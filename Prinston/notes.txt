@@ -1,0 +1,11 @@
+Any algorithm can be expressed in terms of 3 control structures: sequence, selection, repetition.
+The C language uses the above but using braces as blocks of code, The code in blocks tend to follow sequence
+
+//switch statement
+it is a selection control structure that acts like match, equates an expression to the cases which if True continues to that block. after all comparisons, it goes to the default section then exits the switch block
+
+diff repetition structures: while, for, do-while
+
+for is similar to while in c (unlike python where you iterate over an iterable)
+as we pass an expression, 
+it differs as its shorter than while and allows passing incr at parameter itself

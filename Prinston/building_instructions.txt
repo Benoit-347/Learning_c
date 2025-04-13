@@ -1,0 +1,11 @@
+//building
+gcc <file name>   -> default creates a.out executable file
+gcc <file name> -o <output name> creates executable file with output name
+
+// EOF
+taken when you press ctrl D 
+or when using a file, reach end of a file
+
+//passing input output
+executable_1 < executable_2  -> redirect std input by reading 2 to input of 1
+executable_2 > executable_1  -> redirect std output by writing output of 1 to file 2
