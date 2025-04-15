@@ -5,8 +5,9 @@
 
 //a struct stores data as is, such that the elements can also be of diff types
 
+struct name { int a; float b;};
+
 int main(){
-    struct name { int a; float b;};
     struct name var1 = { 3, 4.0 };
 
 }
@@ -14,5 +15,5 @@ int main(){
 // a struct can be of any dimentions
 
 int temp(){
-    struct name2 {int a[30]; float roll_number; struct name;};
+    struct name2 {int a[30]; float roll_number; struct name the_name;};
 }   //a struct can contain another struct within themselves

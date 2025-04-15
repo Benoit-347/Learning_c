@@ -1,6 +1,6 @@
 //building
-gcc <file name>   -> default creates a.out executable file
-gcc <file name> -o <output name> creates executable file with output name
+gcc <file name>                 -> default creates a.out executable file
+gcc <file name> -o <output name>    creates executable file with output name
 
 // EOF
 taken when you press ctrl D 
