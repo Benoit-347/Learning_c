@@ -3,22 +3,23 @@
 
 int * create_calc_input(){
     static int arr[MAXELEMENT];
-    int special_flag = 0, num = 0, input, i;
-    for(i = 0, special_flag = 0; (i<MAXELEMENT) && (input = getchar()) != '\n';){
+    int num = 0, input, i;
+    for(i = 0; (i<MAXELEMENT) && (input = getchar()) != '\n';){
         if (input >= '0' && input <= '9'){
-            num = num*10 + input - '0';
+    if (num == '-'){
+
+            num = -1* input - '0';
+        }
+    else{
+    num = num*10 + input - '0';
+}
         }
 
 
-        else if (input == ' ' && special_flag == 0){
+        else if (input == ' '){
             arr[i] = num;
             num = 0;
             i++;
-        }
-
-        else if (input == ' '  && special_flag ==1){
-            special_flag = 0;
-            continue;
         }
         
         switch (input)
@@ -27,9 +28,7 @@ int * create_calc_input(){
         case '-':
         case '*':
         case '/':
-            special_flag = 1;
-            arr[i] = input;
-            i++;
+            num = input;
             break;
         
         default:
@@ -38,7 +37,6 @@ int * create_calc_input(){
 
 
     }
-    if (special_flag == 0){
         arr[i] = num;
         num = 0;
     }
