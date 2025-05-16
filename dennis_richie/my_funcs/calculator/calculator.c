@@ -10,11 +10,6 @@ int pop(int * arr, int index, int len){
 
 }
 
-int create_calc_input(){
-    int arr[MAXELEMENT];
-    for(int i = 0, input; (i<MAXELEMENT) && (input = getchar()))
-}
-
 int main(){
     int arr[] = {1,2,3,4,5};
     pop(arr, 2, 5);
