@@ -2,9 +2,9 @@
 
 // global variables     (global declarations)
 # define MAXSIZE 100
-static int my_stack[MAXSIZE];
+static double my_stack[MAXSIZE];
 static int my_sp = 0;
-static int number;
+static double number;
 
 // buffer
 #define BUFFER_SIZE 20
@@ -21,14 +21,14 @@ int ungetchar(char c){
 }
 
 // makes use of a custom global arr which stores elements
-int push(int num){
-    extern int my_stack[];
+int push(double num){
+    extern double my_stack[];
     extern int my_sp;
     my_stack[my_sp++] = num;
 }
 
-int pop(){
-    int element = my_stack[--my_sp];
+double pop(){
+    double element = my_stack[--my_sp];
     return element;
 }
 
@@ -36,7 +36,7 @@ int pop(){
 // if its a number, create a repition custom to it alone, such that until the getchar in not int, it keeps taking num.
 int get_element(){
     int ch;
-    extern int number;
+    extern double number;
     int neg_flag = 1;
     number = 0;
 
@@ -49,16 +49,28 @@ int get_element(){
         ch = get_char();
         if (ch >= '0' && ch <='9')
             neg_flag = -1;
-        else
+        else{
             ungetchar(ch);
+            ch = '-';
+        }
     }
     if (ch >= '0' && ch <='9'){
         while(ch >= '0' && ch <='9'){
             number = number*10 + ch - '0';
             ch = get_char();
         }
-        number *= neg_flag;
+        if (ch == '.'){
+            int power = 1;
+            ch = get_char();
+            while(ch >= '0' && ch <='9'){
+                number = number*10 + ch - '0';
+                power *=10;
+                ch = get_char();
+            }
+            number = number/power;
+        }
         ungetchar(ch);
+        number *= neg_flag;
         return '0';
     }
     else {
@@ -68,7 +80,8 @@ int get_element(){
 
 // workflow:
 int main(){
-    int c, op2;
+    int c;
+    double op2;
     while((c = get_element()) != EOF){
         switch (c)
         {
@@ -90,10 +103,10 @@ int main(){
             push(pop() / op2);
             break;
         case '\n':
-            printf("Total: %d\n", pop());
+            printf("Total: %f\n", pop());
             break;
         default:
-            printf("None detected\n");
+            printf("None detected: %c\n", c);
             break;
         }
     }
