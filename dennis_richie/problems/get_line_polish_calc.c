@@ -1,14 +1,20 @@
 #include <stdio.h>
 
 // global variables     (global declarations)
+
+// used by main:
 # define MAXSIZE 100
 static double my_stack[MAXSIZE];
 static int my_sp = 0;
+
+//used by get_element:
 static double number;
 
-//get_line:
+//used by get_line and get element:
 static char arr[MAXSIZE];
 static int i = 0;
+
+//fns:
 
 // makes use of a custom global arr which stores elements
 int push(double num){
@@ -23,9 +29,9 @@ double pop(){
     return element;
 }
 
-
+// cahnges a static arr to have the input from terminal, until a EOF is reached OR max_size limit. (terminates end by 0)
 char * get_line(){
-    extern char * arr;
+    extern char arr[];
     int j;
     for(j = 0; j<MAXSIZE-1 && ((arr[j] = getchar()) != EOF); j++){
         ;
@@ -34,25 +40,34 @@ char * get_line(){
     return arr;
 }
 
+/* 
+This fn makes use of the static arr (modified by get_line)
+uses a static i that keeps track of the arr pos.
+It also makes use of static number that needs to store the int val, to be accessible my main fn.
+*/
 int get_element(){
     extern int i;
-    extern char * arr;
-    extern number;
+    extern char arr[];
+    extern double number;
     int ch, neg_flag = 1, power = 1;
-    //skipping spaces
+
+
+    //skipping spaces (updates pointer to next pos)
     for (; (ch = arr[i]) == ' ';i++)
         ;
 
-    //sign
+    //sign (if true, neg_falg, updates pointer to next pos)
     if ( ch == '-' && (arr[i+1] >='0' && arr[i+1] <= '9') ) {
         neg_flag = -1;
-        i++;
+        ch = arr[++i];
     }
 
+    // conv number to int (sign mul at end)
     if (ch >= '0' && ch <= '9'){
         for (; ( ( (ch = arr[i]) != 0 ) && (ch >= '0' && ch <= '9') );i++)
                 number = number*10 + ch - '0';
     
+        // nested, adds onto number
         if (ch == '.'){
             i++;
             for (; ( ( (ch = arr[i]) != 0 ) && (ch >= '0' && ch <= '9') );i++){
@@ -61,13 +76,15 @@ int get_element(){
             }
             number = number / power;
         }
-        else
-            i--;
+
+        //if number block seq:
         number *= neg_flag;
         return '0';
     }
-    else
+    else{           // when reached here, none was matched ch contains the prev cmp pointer and i++ updates pointer for next call.
+        i++;
         return ch;
+    }
 }
 
 /*workflow:
@@ -78,9 +95,8 @@ match it to my symbols, according push number or pop and push computaion, or if 
 int main(){
     int c;
     double op2;
-    static char * arr = get_line();
-
-    while((c = get_element(arr)) != EOF){
+    get_line(); // right now it acts like taking multiple calcs with /n and with the code in the next line, it will cause multiple prints of total for every \n.
+    while((c = get_element()) != 0){
         switch (c)
         {
         case '0':
@@ -116,5 +132,4 @@ int main(){
     }
     printf("Last element if stack was: %f\nExited program successfully\n", pop());  // exer 4.9 (requires better EOF handling as 2 EOFs req to exit rn)
     return 0;
-
 }
