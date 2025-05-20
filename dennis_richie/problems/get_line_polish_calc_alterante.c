@@ -1,5 +1,17 @@
 #include <stdio.h>
 
+/* points of fns used:
+stack ops in main
+arr rewrote with get_line
+taking and giving elements to main by string return using get_element fn
+
+of get line: 2 forms
+when newline encountr exit and give flag of newline
+when EOF exit and give flag of EOF
+To provide means for program to give real time output, instead of all at the end
+*/
+
+
 // global variables     (global declarations)
 
 // used by main:
@@ -29,7 +41,7 @@ double pop(){
     return element;
 }
 
-// cahnges a static arr to have the input from terminal, until a EOF is reached OR max_size limit. (terminates end by 0)
+// changes a static arr to have the input from terminal, until a EOF is reached OR max_size limit. (terminates end by 0)
 char get_line(){
     extern char arr[];
     extern int i;
@@ -39,6 +51,7 @@ char get_line(){
     for(j = 0; j<MAXSIZE-1 && (arr[j] = getchar()) != EOF && arr[j] != '\n'; j++){
         ;
     }
+    // make use of return to later see if ended by EOF or newline
     if (arr[j] == EOF){
         arr[j] = 0;
         return 0;
@@ -72,7 +85,7 @@ int get_element(){
     // conv number to int (sign mul at end)
     if (ch >= '0' && ch <= '9'){
         for (; ( ( (ch = arr[i]) != 0 ) && (ch >= '0' && ch <= '9') );i++)
-                number = number*10 + ch - '0';
+            number = number*10 + ch - '0';
     
         // nested, adds onto number
         if (ch == '.'){
@@ -84,7 +97,7 @@ int get_element(){
             number = number / power;
         }
 
-        //if number block seq:
+        //under the if number block seq:
         number *= neg_flag;
         return '0';
     }
@@ -103,8 +116,8 @@ int main(){
     int c, get_line_var;
     double op2;
     while(1){
-        get_line_var = get_line();
-        while((c = get_element()) != 0){
+        get_line_var = get_line(); // how the loop was terminated (break if with eoff (0))
+        while((c = get_element()) != 0){    // the get_element reutrns only str '0' else other -> (the arr[j])
             switch (c)
             {
             case '0':
@@ -138,6 +151,6 @@ int main(){
         if (get_line_var == 0)
             break;
     }
-    printf("Last element if stack was: %f\nExited program successfully\n", pop());  // exer 4.9 (requires better EOF handling as 2 EOFs req to exit rn)
+    printf("Last element of stack was: %f\nExited program successfully\n", pop());  // exer 4.9 (requires better EOF handling as 2 EOFs req to exit rn)
     return 0;
 }
