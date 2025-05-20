@@ -176,7 +176,7 @@ int main(){
             break;
         }
     }
-    printf("Last element if stack was: %f\nExited program successfully\n", pop());
+    printf("Last element if stack was: %f\nExited program successfully\n", pop());  // exer 4.9 (requires better EOF handling as 2 EOFs req to exit rn)
     return 0;
 
 }
