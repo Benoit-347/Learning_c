@@ -1,4 +1,21 @@
 #include <stdio.h>
+/*
+The explaination of the workflow of code for future reference:
+aim: to make a simple calculator program by polish method ( 4 2 + 5 * = (4 + 2) * 5  )
+method:
+    1. Taking input from terminal directly (without making it modular by creating a arr and foramtting the arr to have calc formatted elements)
+        one char at a time, 
+    2. if input is number, continue to get number until not num, return num as int (singned float). Else return the char, also at beggining skip space.
+
+        This works as this is made into a fn that is called each time an element is needed. Therefore at the start even the whitespace is skipped.
+        features of this fn: accepts sign and even float
+        Nested fns used:
+            get_char and unget_char: 
+*/
+
+
+
+
 
 // global variables     (global declarations)
 # define MAXSIZE 100
