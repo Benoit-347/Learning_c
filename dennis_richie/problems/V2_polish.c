@@ -10,7 +10,9 @@ method:
         This works as this is made into a fn that is called each time an element is needed. Therefore at the start even the whitespace is skipped.
         features of this fn: accepts sign and even float
         Nested fns used:
-            get_char and unget_char: 
+            get_char and unget_char: makes use of common buffer which is in the global scope, used to put input data back in buffer (simulating it)
+    3. In main fn, takes elements, (switch) if number push it, else  pop and calc it. If '\n' print the value at stack.
+            
 */
 
 
@@ -95,7 +97,10 @@ int get_element(){
     }
 }
 
-// workflow:
+/*workflow:
+take an element from terminal;
+match it to my symbols, according push number or pop and push computaion, or if '\n' print the value at pop()
+    */
 int main(){
     int c;
     double op2;
