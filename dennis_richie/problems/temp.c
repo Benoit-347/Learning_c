@@ -1,3 +1,5 @@
+//tried teseting EOF:
+
 #include <stdio.h>
 /*
 The explaination of the workflow of code for future reference:
@@ -31,14 +33,20 @@ int static bufp = 0;
 int get_char(){
     extern char buf[];
     extern int bufp;
-    return (bufp>0? buf[--bufp]: getchar()); 
+    char temp;
+    printf("Stack before: %c\n", buf[bufp-1]);
+    if ( (temp = (bufp>0? buf[--bufp]: getchar())) == EOF){
+        printf("prinnted return\n");
+        return temp;
+    }
+    printf("Stack after: %c\n", buf[bufp-1]);
+    return temp;
 }   // only 1 max: return (bufp>0? buf[--bufp]: getchar()); (exer 4.8)
 
 int ungetchar(char c){
     extern char buf[];
     extern int bufp;
     buf[bufp++] = c;
-    return 0;
 }   // only 1 max: buf[0] = c; bufp = 1;
 
 // makes use of a custom global arr which stores elements
@@ -46,7 +54,6 @@ int push(double num){
     extern double my_stack[];
     extern int my_sp;
     my_stack[my_sp++] = num;
-    return 0;
 }
 
 double pop(){
@@ -104,7 +111,6 @@ int get_element(){
 int clear_stack(void){ //exer 4.4
     extern int my_sp;
     my_sp = 0;
-    return 0;
 }
 
 double get_top_ele(void){ // exer 4.4
@@ -120,7 +126,6 @@ int swap_top_stack(void){ // exer 4.4
     temp = my_stack[my_sp-1];
     my_stack[my_sp-1] = my_stack[my_sp -2];
     my_stack[my_sp-2] = temp;
-    return 0;
 }
 
 
@@ -133,7 +138,6 @@ int ungetchars(char s[]){ // exer 4.7
         buf[bufp++] = ch;
         i++;
     }
-    return 0;
 }
 
 /*workflow:
