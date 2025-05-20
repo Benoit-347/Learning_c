@@ -6,6 +6,9 @@ static double my_stack[MAXSIZE];
 static int my_sp = 0;
 static double number;
 
+//get_line:
+static char arr[MAXSIZE];
+static int i = 0;
 
 // makes use of a custom global arr which stores elements
 int push(double num){
@@ -21,18 +24,50 @@ double pop(){
 }
 
 
-int * get_line(){
-    static int arr[MAXSIZE];
-    int i;
-    for(i = 0; i<MAXSIZE-1 && ((arr[i] = getchar()) != EOF); i++){
+char * get_line(){
+    extern char * arr;
+    int j;
+    for(j = 0; j<MAXSIZE-1 && ((arr[j] = getchar()) != EOF); j++){
         ;
     }
-    arr[i] = 0;
+    arr[j] = 0;
     return arr;
 }
 
 int get_element(){
+    extern int i;
+    extern char * arr;
+    extern number;
+    int ch, neg_flag = 1, power = 1;
+    //skipping spaces
+    for (; (ch = arr[i]) == ' ';i++)
+        ;
+
+    //sign
+    if ( ch == '-' && (arr[i+1] >='0' && arr[i+1] <= '9') ) {
+        neg_flag = -1;
+        i++;
+    }
+
+    if (ch >= '0' && ch <= '9'){
+        for (; ( ( (ch = arr[i]) != 0 ) && (ch >= '0' && ch <= '9') );i++)
+                number = number*10 + ch - '0';
     
+        if (ch == '.'){
+            i++;
+            for (; ( ( (ch = arr[i]) != 0 ) && (ch >= '0' && ch <= '9') );i++){
+                number = number*10 + ch - '0';
+                power *= 10;
+            }
+            number = number / power;
+        }
+        else
+            i--;
+        number *= neg_flag;
+        return '0';
+    }
+    else
+        return ch;
 }
 
 /*workflow:
@@ -43,7 +78,7 @@ match it to my symbols, according push number or pop and push computaion, or if 
 int main(){
     int c;
     double op2;
-    int * arr = get_line();
+    static char * arr = get_line();
 
     while((c = get_element(arr)) != EOF){
         switch (c)
