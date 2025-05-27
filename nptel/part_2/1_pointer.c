@@ -1,3 +1,9 @@
+/*
+static flat arrays have the 4 byte pointers not allowing *(*(arr +i)+j) method, instead i*j+arr method,
+former was allowed for dynamic arrays, or use cast to [cols] pointer to use that method.
+*/
+
+
 #include <stdio.h>
 
 // we know that variables are associated to their memory location during compilation (the vars are replaced to their addresses)
