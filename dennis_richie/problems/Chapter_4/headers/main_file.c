@@ -5,9 +5,21 @@
     iv) get and unget so that we can later choose to use this or compile with library
 
     Notes:
-        learnt imp lesson: static var is not available for linking hahaha
-                            to ues extern each time a var/fn is being used by another file (not nec for multiple use of extern if done in main once)
-*/
+        learnt imp lesson: static var is not available for linking hahaha (soln simply declare out of main i.e. global -> current file scope  but, available for linking as well)
+                            to use extern each time a var/fn is being used by another file (for fns, it not neccessary for multiple use of extern if done in main once.  Raises warning tho ._.)
+                                    why does mentioning only once work? Ans Since the functions can read from global, once extern is used, the external defined memory becomes accessible throughout that whole file.
+                                        line2: So when all the fns are defined at operations area i.e. main, the fns interlink each other through scope of the current file's externs.
+                                            line3: (the vars could also be done similarly by simply externing them once at current file's extern)
+
+                                            static: provides private, permenent storage of identifiers; want to use multiple global vars but scared if extern conflicts with same names? Using static you can avoid scope issues while linking using extern.
+from line3:
+// Global variable declarations
+    extern double my_stack[];
+    extern int my_sp;
+    extern double number;
+    extern char buf[];
+    extern int bufp;
+                                            */
 
 #include <stdio.h>
 
