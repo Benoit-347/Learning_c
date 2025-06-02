@@ -1,41 +1,44 @@
-// to get: get each line from input; put the line into an arr of size n.
-
 # include <stdio.h>
-# include <string.h>
 # include <stdlib.h>
+# include <string.h>
 
-#define MAX_LINE 1000
-char *arr_p[MAX_LINE];
+#define MAX_LINES 1000
+#define MAX_LINE_LENGTH 1024
 
-int get_line(char * str, int max_len){
-    int i = 0;
-    while ((*(str + i) = getchar()) != EOF && i<max_len){
-        i++;
+char *arr_str[MAX_LINES];
+
+// takes input into a given pointer until \n or EOF or max_line is reached
+int get_line(char *str, int max_line){
+    int n = 0;
+    while((*(str + n) = getchar()) != '\n' && *(str + n) != EOF && n<max_line -1){
+        n++;
     }
-    if (i>0)
-    *(str + i++) = 0;
-    return i;
+    *(str + n) = 0; // removes the last char that caused the end of loop and replaces to 0 (null terminated)
+    return n;   
 }
 
-int get_text(){
-    char str[MAX_LINE];
-    char *str_p;
-    char **arr_ptr = arr_p;
+// to a given array of pointers;    take the values of string from a common str_ptr and copy to a unchnaging str_ptr whose ptr will be stored at arr of str.
+int read_lines(char **ptr){
 
-    int n = get_line(str, MAX_LINE);
-    while (n > 0){
-        str_p = (char *) malloc(n);
-        strcpy(str_p, str);
-        *arr_ptr++ = str_p;
-    printf("Successfully read\n");
-        n = get_line(str, MAX_LINE);
+    char str[MAX_LINE_LENGTH];  // max size of each line
+    char *str_storage;  // copy variable (arr poiner, using malloc)
+
+    int str_len;    // used to obtain no. of chars from getline, to reduce malloc allocation.
+    int lines = 0;  // counts every successful getline
+
+    while(str_len = get_line(str, MAX_LINE_LENGTH) > 0){
+        str_storage = (char *) malloc(str_len + 1); //converts allocation to char type
+        strcpy(str_storage, str);   
+        ptr[lines++] = str_storage; // post-fix makes sure the index lies 1 ahead (where ahead is free; also denotes no. of lines)
     }
-    *arr_ptr = 0;
-    printf("Successfully read\n");
+    return lines;
 }
 
 int main(){
-    get_text();
-    for (int i = 0; arr_p[i] != 0; i++)
-        printf("string %d: %s\n", i, (arr_p[i]));
+    int lines = read_lines(arr_str);    // The real function doing work
+
+    for (int i = 0; i<lines; i++)   // displaying the text for each line in arr of str, using the info of nlines we provided from return.
+        printf("Line %d: %s\n", i, arr_str[i]);
+    
+    return 0;
 }
