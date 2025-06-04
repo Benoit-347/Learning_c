@@ -92,7 +92,25 @@ int getline_(char *arr, int len){
     while ((ch = getchar()) != EOF && ch != '\n' && i<len-1)
         arr[i++] = ch;
     
-    return i + 1;   // leaves 2 uninitialized: at index current and i-1 -> len = 1 for only \n and EOF
+    return i + 1;   
+
+    /*The getline takes input including \n or only the string
+    If only string;
+        "abc" -> returns i as 3 from above algo.
+        need to assign \o at end: arr[len] = 0;
+    if end with \n;
+        "abc\n -> returns i as 4 from above algo
+        need to assign \n at end: arr[len - 1] = 0;
+        
+        here \n acts as a placeholder for \0, whereas in only str, we assgned \0 at new space
+            but when using placeholder of \n, we cannot end input by EOF + EOF as this would make us add EOF to arr. (which if added, solves the problem)
+                hence using permenent i + 1 to create a constant space after exit, so able to maintain the same code as book, and also end with EOF
+                
+    Or we can use only str as output arr, pass len of str and let the program handle adding 0 at end by arr[line +1] = 0; 
+        (the was solved by the \n problem, where \n from getline was replaced with \0 here.) */
+
+        
+    // leaves 2 uninitialized: at index current and i-1 -> len = 1 for only \n and EOF
  /* New method: allows EOF and \n to give output +1 but not storing it. So to allow ending, chks for count if 1 or lower, stops at readlines 
     if (ch == '\n')
         arr[i++] = ch;
