@@ -57,6 +57,7 @@ int calc_duo_opers(int operand_1, int operand_2, char oper_1){  // reused simple
             break;
         default:
             printf("oper_1 Unmatched at duo: %d\n", oper_1);
+            return 0;
     }
 }
 
@@ -89,6 +90,7 @@ int calculate(char* s) {
     int total = 0;
 
     clear_whitespace(s, &i);
+    // get first num
     operand_1 = str_to_int(s, &i);
     clear_whitespace(s, &i);
 
@@ -96,9 +98,11 @@ int calculate(char* s) {
     if (s[i] == 0)
         return operand_1;
 
+
+    // get first oper
     oper_1 = s[i++];
 
-    // tackling operand_1 seq of multi or divi
+    // loop tackling operand_1 seq of multi or divi
     while (oper_1 == '*' || oper_1 == '/'){
         clear_whitespace(s, &i);
         operand_2 = str_to_int(s, &i);
@@ -108,6 +112,7 @@ int calculate(char* s) {
         clear_whitespace(s, &i);
         // tackling only operand_1 of seq * and / input
         if (s[i] == 0)
+            //Endpoint 1:
             return operand_1;
 
         oper_1 = s[i++];
@@ -119,6 +124,7 @@ int calculate(char* s) {
     operand_2 = str_to_int(s, &i);
     clear_whitespace(s, &i);
 
+    //Endpoint 2:
     if (s[i] == 0){
         printf("1. (Returned) Operand_1 + Operand_2 is: %d\n", calc_duo_opers(operand_1, operand_2, oper_1));
         return calc_duo_opers(operand_1, operand_2, oper_1);
@@ -142,13 +148,14 @@ int calculate(char* s) {
 
             if (s[i] == 0){
                 printf("4. Reached end of arr during operand_2 eval; Sum of the operand_1: %d, Operand_2: %d with oper_1: %c is = %d\n", operand_1, operand_2, oper_1, calc_duo_opers(operand_1, operand_2, oper_1));
+                // Endpoint 3:
                 return calc_duo_opers(operand_1, operand_2, oper_1);
             }
 
             oper_2 = s[i++];
         }
 
-        printf("4.(End of loop) Operand_2 now is: %d\n", operand_2);
+        printf("4.(Near end of (s[i] == 0) loop) Operand_2 now is: %d\n", operand_2);
         // oper_2 now contains '+' or '-'
 
         printf("5. Sum of the operand_1: %d, Operand_2: %d with oper_1: %c is = %d\n", operand_1, operand_2, oper_1, calc_duo_opers(operand_1, operand_2, oper_1));
@@ -156,15 +163,19 @@ int calculate(char* s) {
         oper_1 = oper_2;
         clear_whitespace(s, &i);
         operand_2 = str_to_int(s, &i);
-        clear_whitespace(s, &i);
+        clear_whitespace(s, &i); // clearing for next iter s[i] eval (so skip oper_2 too)
         
     }
 
+    // for the last eval upon reaching (s[i] == 0)
+    operand_1 = calc_duo_opers(operand_1, operand_2, oper_1);
+    
+    //Final Endpoint (4):
     return operand_1;
 }
 
 int main(){
-    char arr[] = " 3*4/12 -5/2*4 - 34+ 24/12 ";
+    char arr[] = " 1+2+3 "; //" 3*4/12 -5/2*4 - 34+ 24/12 ";
     //calculate(arr);
     printf("\nMain block print:\nOutput: %d\n\n", calculate((char *) arr));
     return 0;
