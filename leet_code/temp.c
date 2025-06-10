@@ -1,30 +1,37 @@
-/*Given a string s representing a valid expression, implement a basic calculator to evaluate it, and return the result of the evaluation.
+/*Given a string s which represents an expression, evaluate this expression and return its value. 
 
+The integer division should truncate toward zero.
+
+You may assume that the given expression is always valid. All intermediate results will be in the range of [-231, 231 - 1].
+
+Note: You are not allowed to use any built-in function which evaluates strings as mathematical expressions, such as eval().
+
+ 
 
 Example 1:
 
-Input: s = "1 + 1"
-Output: 2
+Input: s = "3+2*2"
+Output: 7
 Example 2:
 
-Input: s = " 2-1 + 2 "
-Output: 3
+Input: s = " 3/2 "
+Output: 1
 Example 3:
 
-Input: s = "(1+(4+5+2)-3)+(6+8)"
-Output: 23
-*/
+Input: s = " 3+5 / 2 "
+Output: 5
+ */
 
-/* Using 3 fns:
-    1) convert str to int: To pass arr and index from start of number; return int
-    2) eval expr: a recursive fn, passing arr and index of the number that is right after parenthesis
-    3) convert, the main fn
-    
-    Understanding the position of i at array and how it is maintained will red most tracing of logic in this porgram*/
 
-#include <stdio.h>
 
-// the i value will hold the index of the next element
+# include <stdio.h>
+
+void clear_whitespace(char * s, int * i){   // shift i over whitespaces (skip all ' ')
+    while (s[(*i)++] == ' ')   // cond is evaluated at the last causing the last i to incr,
+        ;
+    (*i)--;
+}
+
 int str_to_int(char * arr, int * i){    // pass str arr and the index starting from the str int
     int num = 0;
     char ch;
@@ -34,95 +41,135 @@ int str_to_int(char * arr, int * i){    // pass str arr and the index starting f
     }
     return num;
 }
+/*
+int chk_opers(char * s, int i){ // i is copied
 
-// when encounter '(', not changing i value, to be at val after '(' (since cur is in var ch)
-int calc_exp(char * arr, int * i){
-    int num, total = 0;
-    char ch, flag_sign;
+    int temp_operand_1, temp_operand_2;
+    char temp_oper_1, temp_oper_2;
+    
+    //skip whitesspace:
+    clear_whitespace(s, &i);
 
-    while (arr[*i] == ' ')
-       (*i)++;    // skip whitespaces 
+    temp_operand_1 = str_to_int(s, &i);  // i now at new ele
 
-                // the first char if a number must be copied.
-    if (arr[*i] !='(')
-        total = str_to_int(arr, i);
+    clear_whitespace(s, &i);
 
-        // evaluates the exps and returns the total after reaching ')' (Note: i val is incr after loop end i.e. reaching ')' to keep i at new ele
-    while ( (ch = arr[*i]) != ')' ){
-                // printf("ch: %c\n", ch);
-        (*i)++;
-        if (ch == '+')
-            flag_sign = 0;
-        else if (ch == '-')
-            flag_sign = 1;
-        else if (ch >= '0' && ch <= '9'){
-            (*i)--;     // passing str_to_int req i at int str element
-            num = str_to_int(arr, i);   // i now back to next ele
-                            //printf("The n: %d\nSign: %d\n\n", num, flag_sign);
-            if (flag_sign == 0)
-                total += num;
-            else 
-                total -= num;
-        }
-        else if (ch == '('){    
-            num = calc_exp(arr, i); //recur starts (npw the current i is at ele after the ch), returns when this reaches a ')' and this one changes i to ele after ')'.
-            if (flag_sign == 0)
-                total += num;
-            else 
-                total -= num;
-        }
-        else if (ch == ' ')
-            ;
-        else 
-            printf("Unidentified exp: '%c'\n", arr[--(*i)]);
-    }
-    (*i)++; // the part of fn that does all the ')' skipping to maintain next ele index throughout recurs.
-    return total;
+    if (s[i] == 0)
+        return 1;   // indicates number of operands until end of arr (i is now at)
+    
+    temp_oper_1 = s[i++];
+
+    clear_whitespace(s, &i);
+
+    temp_operand_2 = str_to_int(s, &i);  // i now at new ele
+
+    clear_whitespace(s, &i);
+
+
+    if (s[i] == 0)
+    return 2;   // indicates 2 number of operands
+
+    temp_oper_2 = s[i++];
+    return 3;   // indicates 3rd operands (or more), i at the 3rd operand.
 }
 
-int calculate(char* s) {    
-    int i = 0, total = 0, num;
-    char ch, flag_sign;
+*/
 
-    while (s[i] == ' ')
-        i++;    // skip whitespace  
-                // i here, acts as index for next element
-    total = str_to_int(s, &i); // initializing starting number
-
-    while ( (ch = s[i++] ) != 0){   // next number
-        if (ch == '+')
-            flag_sign = 0;  // indicates do addition
-        else if (ch == '-')
-            flag_sign = 1;  // indicates do subtraction
-        else if ( ch >= '0' && ch <= '9'){
-            --i;    // adjust i to give current index
-            num = str_to_int(s, &i);
-            if (flag_sign == 0)
-                total += num;
-            else
-                total -= num;
-            }
-        else if (ch == ' ')
-            ;
-        else if (ch == '('){
-            // keeping i at next element, number index
-            num = calc_exp(s, &i);
-            if (flag_sign == 0)
-                total += num;
-            else
-                total -= num;
-        }
-        else{
-            printf("Unidentified match: '%c'\n", ch);
-            return 0;
-        }
+int calc_duo_opers(int operand_1, int operand_2, char oper_1){  // reused simple fn to calc 2 operands
+    switch (oper_1){
+        case '+' :
+            return operand_1 + operand_2;
+            break;
+        case '-' :
+            return operand_1 - operand_2;
+            break;
+        case '*' :
+            return operand_1 * operand_2;
+            break;
+        case '/' :
+            return operand_1 / operand_2;
+            break;
+        default:
+            printf("oper_1 Unmatched at duo: %d\n", oper_1);
     }
-    return total;
 }
 
-int main (){
-    char arr[] = " 2-1 + 2";
-    int num = 0;
-    num = calculate(arr);
-    printf("The number is %d\n", num);
+int calculate(char* s) {
+    int operand_1, operand_2, operand_3;
+    char oper_1, oper_2 = '+';
+    int i = 0;
+    char ch;
+    int total = 0;
+
+    clear_whitespace(s, &i);
+    operand_1 = str_to_int(s, &i);
+    clear_whitespace(s, &i);
+
+    // tackling single input
+    if (s[i] == 0)
+        return operand_1;
+
+    oper_1 = s[i++];
+
+    // tackling operand_1 seq of multi or divi
+    while (oper_1 == '*' || oper_1 == '/'){
+        clear_whitespace(s, &i);
+        operand_2 = str_to_int(s, &i);
+
+        operand_1 = calc_duo_opers(operand_1, operand_2, oper_1);
+
+        clear_whitespace(s, &i);
+        // tackling only operand_1 of seq * and / input
+        if (s[i] == 0)
+            return operand_1;
+
+        oper_1 = s[i++];
+    }
+
+    // now operand_1 is complete, moving on to a continuos taking of operand_2:
+        // Preparing for operand_2 loop:
+    clear_whitespace(s, &i);
+    operand_2 = str_to_int(s, &i);
+    clear_whitespace(s, &i);
+
+    if (s[i] == 0)
+        return calc_duo_opers(operand_1, operand_2, oper_1);
+
+    
+
+    // main loop since operand_1. (after multi/divi eval seq of operand_2, operand_1 will now starting totaling the additions and subtractions)
+    while (s[i] != 0){
+
+        oper_2 = s[i++];
+        // operand_2 loop
+        while (oper_2 == '*' || '/'){
+            clear_whitespace(s, &i);
+            operand_3 = str_to_int(s, &i);
+            operand_2 = calc_duo_opers(operand_2, operand_3, oper_2);
+
+            clear_whitespace(s, &i);
+
+            if (s[i] == 0)
+                return calc_duo_opers(operand_1, calc_duo_opers(operand_2, operand_3, oper_2), oper_1);
+
+            oper_2 = s[i++];
+        }
+
+        // oper_2 now contains '+' or '-'
+        operand_1 = calc_duo_opers(operand_1, operand_2, oper_1);
+        oper_1 = oper_2;
+        clear_whitespace(s, &i);
+        operand_2 = str_to_int(s, &i);
+        clear_whitespace(s, &i);
+        
+    }
+
+    return operand_1;
+}
+
+int main(){
+    char arr[] = " 3*4/12 - 20*3"; //" 3*4/12 -5/2*4 - 34+ 24/12 ";
+    //calculate(arr);
+    printf("Output: %d\n", calculate((char *) arr));
+    return 0;
 }
