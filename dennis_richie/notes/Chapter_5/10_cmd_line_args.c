@@ -1,4 +1,9 @@
+/* Ways to pass input: i) Aready in program by assigning
+                        ii) By terminal at runtime using stdio
+                        iii) By passing input strings while running file
+                        */
 //we can pass two arguments to main; by convention, first one is called- argc; second one is called- argv.
+    // arcv: an array of pointers, pointers to strings.
     // consider than we pass arguments at terminal when running files; eg- file_1 hello world
         // passes 3 strings: "file_1", "hello", "world".
     // at this instance the subcategory of arguments passed during file_running is passed to argv as its pointers into an array. (pointers i.e begginig of that soecific string)
