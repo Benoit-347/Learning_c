@@ -1,4 +1,3 @@
-#  include ""
 
 void dcl(void){
     int ns;
