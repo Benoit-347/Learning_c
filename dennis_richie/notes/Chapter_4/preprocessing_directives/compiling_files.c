@@ -9,5 +9,5 @@
                                             Else: Recommended to still use #include to reduce comp time (single pipeline)
                                                 Nuance: modularity for very large projects - terminal multi file compilation
                                                 */
-# include <defining.c>  // Use <> for default implementation or "" for first checking dir of source file then to default implementation
+# include "defining.c"  // Use <> for including files at the standard library path only, or "" for first checking dir of source file then to default implementation path.
     // or gcc file_main.c file_1.c -o temp.exe
