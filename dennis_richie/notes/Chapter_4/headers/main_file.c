@@ -7,7 +7,7 @@
     Notes:
         learnt imp lesson: static var is not available for linking hahaha (soln simply declare out of main i.e. global -> current file scope  but, available for linking as well)
                             to use extern each time a var/fn is being used by another file (for fns, it not neccessary for multiple use of extern if done in main once.  Raises warning tho ._.)
-                                    why does mentioning only once work? Ans Since the functions can read from global, once extern is used, the external defined memory becomes accessible throughout that whole file.
+                                    why does mentioning only once work? -> Ans Since the functions can read from global, once extern is used, the external defined memory becomes accessible throughout that whole file.
                                         line2: So when all the fns are defined at operations area i.e. main, the fns interlink each other through scope of the current file's externs.
                                             line3: (the vars could also be done similarly by simply externing them once at current file's extern)
 
