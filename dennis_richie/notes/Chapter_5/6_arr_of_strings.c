@@ -17,10 +17,10 @@ int get_line(char *str, int max_line){
     return n;   
 }
 
-// to a given array of pointers;    take the values of string from a common str_ptr and copy to a unchnaging str_ptr whose ptr will be stored at arr of str.
+// to a given array of pointers;   aim: to cpy strings from a input and store at a arr of ptrs. So req: the str arr itself to be permentantly stored. take the values of string from "a common str_ptr" (getline here) and copy to a unchnaging str_ptr (permanent storage) whose ptr will be stored at arr of str.
 int read_lines(char **ptr){
 
-    char str[MAX_LINE_LENGTH];  // max size of each line
+    char str[MAX_LINE_LENGTH];  // max size of each line, contains the input str
     char *str_storage;  // copy variable (arr poiner, using malloc)
 
     int str_len;    // used to obtain no. of chars from getline, to reduce malloc allocation.

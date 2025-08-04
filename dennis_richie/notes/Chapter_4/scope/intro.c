@@ -34,6 +34,7 @@ int main(){
 }
 
 /*
+TLDR use main only once in multi compilation of files
 I tried compiling multiple files and found out: compiling multiple files is similar to running the code of file 1 in current file,
 so def of main in file 1 will conflict in file current.
 Therefore treat them as storage/ extern files rather than normal files.
