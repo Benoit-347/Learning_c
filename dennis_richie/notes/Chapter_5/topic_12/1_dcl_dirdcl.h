@@ -12,9 +12,11 @@ void dcl(void){
 
 void dirdcl(void){
     int type;
-
-    if (tokentype != ')'){
+    if (tokentype == '('){
+        dcl();
+        if (tokentype != ')'){
         printf("error: missing )\n");
+        }
     }
     else if (tokentype == NAME)
         strcpy(name, token);
