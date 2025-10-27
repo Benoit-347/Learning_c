@@ -1,3 +1,13 @@
+// the comiler makes available to copy blocks of memory of structures by copying mechanism in C (syn by copying one struct obj_name to another stuct_obj name)
+    // it copies all the members of obj_1 to obj_2 of same struct type.
+
+
+/*
+Structures:
+They are in memory just range of memory,
+the different elements are made known at compiler time by the descripter table, it keeps metadata of the offset of each member in struct.
+On compilation all tokens refering to members is replaced with this direct arr-indexing method with the struct obj as the starting loc. (hence, structures being very similar to arrs, with added feature of copying all members with one line (maybe simliar to memcpy))*/
+
 // legals operation of functions on structures are:
     // i) copying a struct
     // ii) taking its address with '&' operator
