@@ -7,6 +7,7 @@ Structures:
 They are in memory just range of memory,
 the different elements are made known at compiler time by the descripter table, it keeps metadata of the offset of each member in struct.
 On compilation all tokens refering to members is replaced with this direct arr-indexing method with the struct obj as the starting loc. (hence, structures being very similar to arrs, with added feature of copying all members with one line (maybe simliar to memcpy))*/
+    // it matches to the descriptor symbol table during compilation, and does no symbol table matching during runtime.
 
 // legals operation of functions on structures are:
     // i) copying a struct
