@@ -35,19 +35,32 @@ struct node * addtree(struct node * p, char * word){
                         // return p; anyways this code falls back to after else
     }
     else if ( (result = strcmp(word, p -> word)) > 0 )
-        addtree(p -> right, word);
+        p -> right = addtree(p -> right, word);
     else if (result < 0)
-        addtree(p -> left, word);
-    else
+         p -> left = addtree(p -> left, word);
+    else{
         p -> count++;
+        printf("New count of %s is: %d\n", p-> word, p -> count);
+    }
     return p;
+}
+
+// program ends if passed parameter p is null, else, go to leftmost sequence until null, then return back.. and whn back  continue to print the next instruction (print cur node) then again chain to right most of cur node (the one before leftmost null) and thn 1 step back and print cur node, doing this to every node withing 1st nest, completes first leftmost node, then this keeps going until rightmost node is reached, (rightmost NULL is the end cond now)
+void treeprint(struct node * p){
+    if (p){
+        treeprint(p -> left);
+        printf("Word %s appeared %d times\n", p -> word, p -> count);
+        treeprint(p -> right);
+    }
 }
 
 int main(){
     struct node * p = 0;
-    char * input_word;
+    char input_word[100];
     while ( (getword(input_word, 100) != EOF) )
-        printf( "Value: \t%s \t count: \t %d\n", input_word, addtree(p, input_word) -> count);
-
+        p = addtree(p, input_word);
+    
+    printf("\n---FINAL OUTPUT---\n");
+    treeprint(p);   // does a recursive print starting from the left most node of root struct, towards the right most from the leftmost branch. (the right most starting node will be later than the leftmost nested most node)
     return 0;
 }

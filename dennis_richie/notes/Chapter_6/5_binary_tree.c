@@ -17,6 +17,7 @@
 
 // NOTE: in a binary tree, each node can only have max 2 pointers (pointing to next obj thats like itself).
     // in imagination, virtually, the tree when downward, wont really reach a overhead end; instead it simply follows a sequence, and such sequences (continuous left && continous right) may be in its branch, or in its childs sequence.
+        // only drawback is if the tree is not spread out (unbalanced is official word) then only when accessing/ searching an element, it acts as a linear search at worst case scenario (i.e. worst case scenario = input is not random and passed as linear order)
 struct node {
     int value;
     struct node * left_child;
