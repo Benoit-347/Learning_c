@@ -71,7 +71,7 @@ int main(){
         
         ptr_to_struct = binary_search(input_word, keytab, count); // search and result // add additional line above this statement with if conditions to filter to allow seach on only aphabet chars in word arr.
         
-        if ( (!ptr_to_struct) )
+        if (ptr_to_struct)
             ptr_to_struct -> count++;   // if result was successful
         else
             printf("Not detected %s\n", input_word);
