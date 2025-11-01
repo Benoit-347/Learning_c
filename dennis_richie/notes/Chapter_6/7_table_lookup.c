@@ -38,12 +38,14 @@
 
 // CODE
 # include <stdio.h>
-# include <strings.h>
+# include <string.h>
 # include <stdlib.h>
 
 # define HASHSIZE 101
 
+// conv word to int
 unsigned int hash(char * word){
+    char * temp = word;
     char ele = *word++;
     unsigned int result = 0;
     while (ele){
@@ -51,29 +53,52 @@ unsigned int hash(char * word){
         ele = *word++;
     }
 
-    printf("Found hash %d\n", result % 101);
+    printf("Hashed %s to %d\n", temp, result % 101);
     return result % 101;    // This produces the starting pos in an hastab arr
 }
 
+// create a struct having word and ability to hold chain of same pos structs.
 struct node{
     char * word;
     char * replacement_word;
     struct node * next;
 };
 
+// fn to insert structs to an arr, by passing ptrs to arr to preserve memory and insertion time, and dynamic-ness.
 void insert(struct node ** hastab, char * word){
     unsigned int ele = hash(word);
     struct node * struct_ptr = malloc(sizeof(struct node));
-    struct_ptr -> word = word;
+    struct_ptr -> word = strdup(word);
+    struct_ptr->next = NULL;
+
 
     struct node * cur_ptr;
     cur_ptr = *(hastab + ele);
     if ( cur_ptr ){
-        printf("Copy exists!\n");
+        printf("Copy exists! Moving ahead at index %d to next node at chain\n", ele);
+        while (cur_ptr -> next){
+            printf("Copy exists! Moving ahead at index %d to next node at chain\n", ele);
+            cur_ptr = cur_ptr -> next;
+        }
         cur_ptr -> next = struct_ptr;
     }
     else
         *(hastab + ele) = struct_ptr;
+}
+
+// search all chains at offset of hastmap, i.e. index
+int search(struct node ** hashmap, char * word){
+    unsigned int ele = hash(word);
+    struct node * cur_ptr;
+    cur_ptr = *(hashmap + ele);
+    while ( cur_ptr ){
+        if ( !strcmp(word, cur_ptr -> word))
+            return 1;
+        else
+            cur_ptr = cur_ptr -> next;
+    }
+
+    return 0;
 }
 
 int main(){
@@ -85,5 +110,8 @@ int main(){
     insert(hashtab, word1);
     insert(hashtab, word2);
     insert(hashtab, word3);
+
+    if ( search(hashtab, word1) )
+        printf("Found word: %s\n", word1);
     return 0;
 }
