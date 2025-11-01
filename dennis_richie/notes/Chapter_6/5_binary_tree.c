@@ -23,3 +23,5 @@ struct node {
     struct node * left_child;
     struct node * right_child;  // in mem, we will hold jumping ptrs of each struct, depending on the order of obtaining input; older the holding struct, lesser its ptr would be cmp to its left/right_child struct (by age of input the sturct is also created hence its ptr loc in mem).
 };
+
+// sidenote: how do you think the ptr cast from a series malloc allocation can asign storage, if alignment is needed for a obj with different bit size (for cpu to maintain speed in access i.e. alignment), maintained my malloc fn disccused in ch 8 of the "THe C programming languange" book with a single code on the molloc fn.
