@@ -30,11 +30,14 @@
         #define FIELD_A_MASK  0x00000007  // bits 0–2
         #define FIELD_B_MASK  0x000000F8  // bits 3–7
         #define FIELD_A_SHIFT 0
-        #define FIELD_B_SHIFT 3
+        #define FIELD_B_SHIFT 3     
+                                // note (alternative to # define is) enum(FIELD_A_MASK = 0x00000007, FIELD_B_MASK = 0x000000F8, FIELD_A_SHIFT = 0, FIELD_B_SHIFT 3 );
+    int main(){
 
+        int value = 10;
         //🔹 Setting a Bit Field
-        reg &= ~FIELD_B_MASK;                // clear bits 3–7
-        reg |= (value << FIELD_B_SHIFT) & FIELD_B_MASK;  // set value
+        reg &= ~FIELD_B_MASK;                // clear bits 3–7      // the operators mean:- reg = reg & (R.H.S expr)
+        reg |= (value << FIELD_B_SHIFT) & FIELD_B_MASK;  // set value   // the operators mean:- reg = reg | (R.H.S expr
 
         //🔹 Reading a Bit Field
         unsigned int b_value = (reg & FIELD_B_MASK) >> FIELD_B_SHIFT;
@@ -53,7 +56,7 @@
             } bits;
         };
 
-        int main() {
+
         union Register r;
             r.all = 0;
             r.bits.flag = 1;

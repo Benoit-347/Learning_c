@@ -3,6 +3,8 @@
         "stdio.h": "c",
         "cmath": "c",
         "ctype.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "compare": "c",
+        "type_traits": "c"
     }
 }
