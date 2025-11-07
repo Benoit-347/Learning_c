@@ -1,3 +1,2 @@
-HELLO WORLD,
-THIS IS A TEXT FILE.
-GOOD DAY!
+Writing...
+First write.

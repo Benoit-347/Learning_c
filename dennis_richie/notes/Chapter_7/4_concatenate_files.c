@@ -17,7 +17,7 @@ int main(int argc, char *argv[]){
         filecopy(stdin, stdout);
     else
         while (--argc > 0)
-            if ((fp = fopen(++argv, "r")) == NULL){ // argv holds whole args as elements, i.e. arr of pointers.
+            if ((fp = fopen(*++argv, "r")) == NULL){ // argv holds whole args as elements, i.e. arr of pointers.
                 printf("cat: can't open %s\n", *argv);
                 return 1;
             }

@@ -148,11 +148,11 @@
 int main(){
     // file_ptr is a ptr to a "FILE". ( FILE is not a structure, however, it is defined with a typedef)
     FILE *file_ptr = fopen("temp_3.txt", "r");  // pass 2 arguments, 1) a char ptr to the string of file_name. 2) type of file operations going to do.
-                                                // some systems also need you to specify (binary or text) the type of file opening by a prefix b, to r/w.
+    FILE *file_ptr_2 = fopen("temp_3.txt", "w");                                         // some systems also need you to specify (binary or text) the type of file opening by a prefix b, to r/w.
     
     // reading-
     char var = getc(file_ptr);  // getc returns a single character from the file. returns EOF in case error or if end of file was reached.
-    putc(file_ptr, 'x');    // writes a single character into the file, returns the character written. Retuns EOF if error occurs.
+    putc('x', file_ptr);    // writes a single character into the file, returns the character written. Retuns EOF if error occurs.
 
     // when starting the C program, the OS is reponsible to open 3 imp files:- 1) stdin 2) stdout 3) stderr. (these files are opened and their file ptrs are stred withing these variable, from which, it is defined in stdio.h lib)
         // hence:
@@ -161,9 +161,9 @@ int main(){
 
 
         //With formatted reading and writing:   (it is similar to usual printf and scanf, except that pass file_ptr as first argument.)
-            char arr[100];
+            char arr[100] = {0};
             fscanf(file_ptr, arr);
-            fprintf(file_ptr, "Writing...\nFirst write.");
+            fprintf(file_ptr_2, "Writing...\nFirst write.");
 
     fclose(file_ptr);   // this does the reverse of fopen, it breaks the connection between FILE * ptr and external name in file descriptor table of kernel of "open files".
                             // as for a particular program for some systems, the OS prevents multiple files from being open at the same time.
