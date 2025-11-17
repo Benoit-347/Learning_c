@@ -42,7 +42,7 @@ struct node * addtree(struct node * p, char * word){
         p -> count++;
         printf("New count of %s is: %d\n", p-> word, p -> count);
     }
-    return p;
+    return p;   // outside recursios's calls, at this most parent level, it finally returns root of the struct_ptr
 }
 
 // program ends if passed parameter p is null, else, go to leftmost sequence until null, then return back.. and whn back  continue to print the next instruction (print cur node) then again chain to right most of cur node (the one before leftmost null) and thn 1 step back and print cur node, doing this to every node withing 1st nest, completes first leftmost node, then this keeps going until rightmost node is reached, (rightmost NULL is the end cond now)
