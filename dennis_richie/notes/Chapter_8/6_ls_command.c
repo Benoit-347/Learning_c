@@ -26,9 +26,79 @@
                                                     // 1. a portable part
                                                     // 2. a platform dependent part
 
-#define _GNU_SOURCE // to make GNU specific variable words available like O_DIRECTORY
-# include <sys/stat.h>
 
+// jmp to line 98 -> 129 -> 112 for ideal algo work flow path
+    // structs: i) opendir- initilaizes My_Dir and dir_handle, ii) readdir- writes into handle (at buf member) entries of linux_dirent64
+        // opendir:
+        /*
+        opendir("someDir")
+            ├─ open("someDir", O_RDONLY|O_DIRECTORY)
+            ├─ malloc(sizeof(My_DIR) + sizeof(dir_handle))
+            ├─ initialize My_DIR (fd + embedded My_Dirent)
+            ├─ initialize dir_handle buffer state (nread=0, bpos=0)
+            └─ return My_DIR*  (dfd)
+
+        readdir(dfd)
+            ├─ handle = get_handle(dfd)
+            ├─ bpos >= nread → buffer empty
+            ├─ syscall(getdents64) fills handle->buf with multiple linux_dirent64 entries
+
+                    linux_dirent64
+                    ├─ parse entry d = (buf + bpos)
+                    ├─ copy d->d_name → dfd->d.name
+                    ├─ dfd->d.ino = d->d_ino
+                    ├─ advance bpos
+                    └─ return &dfd->d   (= dp)
+        */
+// dirwalk:
+/*
+dirwalk(dir, fcn=fsize)
+ ├─ local buffer: char name[MAX_PATH]
+ ├─ My_Dirent *dp;
+ ├─ My_DIR *dfd = opendir(dir);
+ │
+ │   opendir(dir):
+ │    ├─ open(dir, O_RDONLY|O_DIRECTORY)
+ │    ├─ malloc(sizeof(My_DIR) + sizeof(dir_handle))
+ │    ├─ initialize wrap_dp (My_DIR)
+ │    ├─ initialize wrap_h  (dir_handle)
+ │    └─ return wrap_dp  (dfd)
+ │
+ ├─ if dfd == NULL → skip (OK)
+ ├─ while ((dp = readdir(dfd)) != NULL):
+ │
+ │   LOOP BEGINS (iterates once per directory entry)
+ │
+ │   readdir(dfd):
+ │    ├─ h = get_handle(dp)
+ │    ├─ if buffer empty: syscall(getdents64)
+ │    │    fills h->buf with multiple linux_dirent64 entries
+ │    ├─ read next d = (linux_dirent64 *)(buf + bpos)
+ │    ├─ validate d_reclen
+ │    ├─ skip if d_ino == 0
+ │    ├─ copy d->d_name into dp->d.name (max NAME_MAX=14)
+ │    ├─ dp->d.ino = d_ino
+ │    ├─ advance h->bpos
+ │    └─ return &dp->d
+ │
+ │   Back in dirwalk:
+ │
+ │   ├─ if dp->name == "." or ".." → continue LOOP
+ │   ├─ if dir/name too long → warn
+ │   └─ else:
+ │        ├─ sprintf(name, "%s/%s", dir, dp->name)
+ │        └─ (*fcn)(name) → fsize(name)
+ │
+ │   (LOOP repeats for all entries)
+ │
+ ├─ closedir(dfd)
+ │   ├─ get_handle(dp)
+ │   ├─ close(h->fd)
+ │   └─ free(dp)   (frees both My_DIR + dir_handle block)
+ │
+ └─ return to fsize(dir)
+*/
+#define _GNU_SOURCE // to make GNU specific variable words available like O_DIRECTORY
 #define NAME_MAX 14  // longest filename component, system−dependent 
 typedef struct {    // portable directory entry
     long ino;   // inode number
@@ -38,7 +108,7 @@ typedef struct {    // portable directory entry
 // each direcory of name and inode has a descriptor.
 typedef struct {    // minimal members (no buffering)
     int fd;     // file descriptor for the directory
-    My_Dirent d;   // directory entry.
+    My_Dirent d;   // directory entry.  // after compilation, this reduces to member 1 and member 2 of struct Dirent
 } My_DIR;
 
 /* Declarations used by the rest of your code (match usage in dirwalk) */
@@ -46,9 +116,11 @@ My_DIR *opendir(char *dirname);
 My_Dirent *readdir(My_DIR *dfd);
 void closedir(My_DIR *dfd);
 
+
+//SKIP
 /* 'stat' system call takes a filename and returns all of the information in the inode for that file, or −1 if there is an error. That is, fills the structure stbuf with the inode information for the file name. */
-char *name;
-struct stat stbuf;
+// char *name;
+// struct stat stbuf;
 // stat(name, &stbuf);
 
 /* inode information returned by stat in <sys/stat.h> 
@@ -68,6 +140,7 @@ struct stat
 };
 */
 
+//SKIP
 // The st_mode entry contains a set of flags describing the file. The flag definitions are also included in <sys/types.h>; we need only the part that deals with file type:
 #define S_IFMT    0160000  /* type of file: */
 #define S_IFDIR   0040000  /* directory */
@@ -109,18 +182,18 @@ int main(int argc, char **argv)
     // If the file is a directory, however, fsize first calls dirwalk to handle all the files in it.
     // flag names S_IFMT and S_IFDIR are used to decide if the file is a directory.
 
-void fsize(char *name)
+void fsize(char *name)  // name = path of dir or file
 {
     struct stat stbuf;
 
-    if (stat(name, &stbuf) == -1) {
+    if (stat(name, &stbuf) == -1) {     // this fn reads dir/file and writes info onto stbuf.
         fprintf(stderr, "fsize: can't access %s\n", name);
         return;
     }
     if ((stbuf.st_mode & S_IFMT) == S_IFDIR)    // the recur call like binary tree, go to sub list until file, then all files in sub and Upwards.
         dirwalk(name, fsize);
     
-    printf("%8ld %s\n", (long)stbuf.st_size, name);   // end case of recur (dir walk also ends from here).
+    printf("%8ld %s\n", (long)stbuf.st_size, name);   // the only printing part AND THE end case of recur (dir walk also ends from here). (this comment is true for AT LAST FN CALL of the recur duo jumping ONLY)
 }
 
 // dirwalk is a fn tht calls fsize(). Since inside every fsize(), there may be a dir, the two functions call each other recursively.
@@ -132,10 +205,15 @@ void dirwalk(char *dir, void (*fcn)(char *))    // 2nd arg is a fn ptr
     My_Dirent *dp;
     My_DIR *dfd;
 
-    if ((dfd = opendir(dir)) == NULL) {
+    dfd = opendir(dir);
+
+    // cannot open
+    if ((dfd) == NULL) {
         fprintf(stderr, "dirwalk: can't open %s\n", dir);
         return;
     }
+
+    // reading all files withing a dir
     while ((dp = readdir(dfd)) != NULL) {
         if (strcmp(dp->name, ".") == 0 ||
             strcmp(dp->name, "..") == 0)
@@ -143,9 +221,11 @@ void dirwalk(char *dir, void (*fcn)(char *))    // 2nd arg is a fn ptr
         
         if (strlen(dir) + strlen(dp->name) + 2 > sizeof(name))
             fprintf(stderr, "dirwalk: name %s %s too long\n", dir, dp->name);
-        else {      // the actual body of dirwalk
-            sprintf(name, "%s/%s", dir, dp->name);      // done for all files (from while loop)
-            (*fcn)(name);      // for each element in read, call fsize of it, if it is dir it will go through another fwalk.
+    
+        // the actual body of dirwalk
+        else {      // call fsize() for each file. (reach readdir)
+            sprintf(name, "%s/%s", dir, dp->name);      // write to name var, the dir path; to call fizse on it.
+            (*fcn)(name);      // call fsize(), for each element in read, if it is dir it will go through another fwalk.
         }
     }
     closedir(dfd);

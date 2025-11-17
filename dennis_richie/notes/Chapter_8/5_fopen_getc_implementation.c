@@ -25,7 +25,7 @@
 // a sttuct that contains base pos, cur pos, remaining size, file_access mode, file descriptor.
 
 typedef struct _iobuf {     
-    int cnt; // characters left
+    int cnt; // shows how much of space left in buffer (for putc, in stdout; ) (stdin, it denots how many chars left to consume) (but, count = max_space - cnt (cnt = free space left))
     char *ptr; // next character position 
     char *base; // location of buffer
     int flag; // mode of file access 
@@ -34,8 +34,9 @@ typedef struct _iobuf {
 extern FILE _iob[OPEN_MAX];
 
 // will be opened at PART 5,    part-5 already sets up values to 0 to the members. (this starts the file management, by _iob keeping all files)
-# define stdin   (&_iob[0]) // this is a file; 1st struct FILE out of 20 file desciptor elements.
-# define stdout  (&_iob[1])
+// this is a file; 1st struct FILE out of 20 file desciptor elements.
+# define stdin   (&_iob[0]) // this is a buffer, to which, elements are removed, then pulled when empty (sys call reads data and fulls)
+# define stdout  (&_iob[1]) // even this buffer, elements added, thn flushed when full  (sys call writes and empties data)
 # define stderr  (&_iob[2])
 
 enum _flags {
@@ -56,7 +57,9 @@ int _flushbuf(int, FILE *); // calling a function _flushbuf when its buffer is f
 
             // putc and getc uses buffers as (read from buf) (characters to write buf), adds a char to buff in write each putc; adds ptr in read buff to show getc, uses cnt to denote when 0 ele left. putc uses cnt to show buff is full.
                     // if there is atleast 1 char within buff (has -- prefix, so condition- '>=0' )
+                    // cnt = no of chars left to consume from prior read
 # define getc(p)    (--(p)->cnt >= 0 ? (unsigned char) *(p)-> ptr++ : _fillbuf(p))  // obtain 1 char from _iobuf,   inside struct, add 1 to ptr after returning [ptr]. 
+                    // cnt = space left in buff
 # define putc(x, p) (--(p)->cnt >= 0 ? *(p)->ptr++ = (x) : _flushbuf((x), p))   // here notice the '=' operator, 
 // putc and getc uses different buffers here. Writing to stdout- increase ptr in buff of (to write to stdout) after adding one item to the to write buf
                                             // |||ly            increase ptr in buff (to read from stdin) after a read op.

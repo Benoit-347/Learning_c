@@ -18,3 +18,18 @@
 #ifndef HDR2
 #define HDR2 5
 #endif
+
+
+/*
+Enumerations are unique types with values ranging over a set of named constants called enumerators. The
+form of an enumeration specifier borrows from that of structures and unions.
+enum−specifier:
+enum identifieropt { enumerator−list }
+enum identifier
+enumerator−list:
+enumerator
+enumerator−list , enumerator
+enumerator:
+identifier
+identifier = constant−expression
+*/

@@ -181,30 +181,53 @@ void free(void *ap){
 
     bp = (Header *) ap -1;  // push header of ptr as well to free list
 
-    // this loop checks if the new free allocation is near the eges of free list. (uses circular queue feature)
-    // for loop: normal cond- increasing p and p->str, bp bw a free range; if cond- special pos of p and p->s.str, p->s.ptr has gone to left edge, and bp is between thisleft or right edge.
-        // loop cond holds true as long as bp is not (after parent and before current) -> between 2 blocks of free mem (it does NOT hold true for unique pos whr p > p->s.ptr; as here bp>p but < p->s.ptr showing normal p and p->ptr, hence not edge case)
+    // this loop checks if the new free allocation is bw 2 free blocks OR near the eges of free list. (uses circular queue feature)
+        // 1. for loop: normal cond- increasing p and p->ptr, bp bw a free range
+        // 2. if cond: encouters special pos of p and p->s.ptr => p > p->s.ptr;  p->s.ptr has gone to left edge, and bp is between this left or right edge.
         for (p = freep; !( bp > p  && bp < p->s.ptr ); p = p->s.ptr)
-            if (p >= p-> s.ptr && (bp > p || bp < p->s.ptr))    // p > p->s.ptr shows the unique pos of parent when, p is at right edge and p->s.ptr is at left edge
-                                                                // the or cond chks right edge (bp > p ) or left edge (bp < p->s.ptr)
+            if (p >= p-> s.ptr && (bp > p || bp < p->s.ptr))    // the or cond chks right edge (bp > p ) or left edge (bp < p->s.ptr)
             break;  // freed block at start and end of arena
     
-    // join to upper nbr
-    if (bp + bp->s.size == p-> s.ptr){
-        bp -> s.size += bp->s.size;
-        p->s.ptr = p->s.ptr->s.ptr;
-    }
-    else
-        bp->s.ptr = p->s.ptr;
+    // HAS 2 cond- 
+        // 1. chk right block is adj to bp,
+        // 2. chk left  block is adj to bp.
+            // possible- Both are adjacent (both if body is run), 1 is adjacent (true for unique pos also) (one if and one else is run), 0 is adjacent (both else is run)
+                // both are adj
+                    // bp, p->s.ptr headers to be skipped
+                    // p->s.ptr = p->s.ptr->s.ptr; p size += bp + p->s.ptr
+                // only 1 adj:
+                    // if only left adj, simply add left size
+                    // if only right is adj, point bp->s.ptr to p->s.ptr->s.ptr
+                // none are adj:
+                    // no merge, just insert bp
+                    // bp->s.ptr = p->s.ptr; p->s.ptr = bp;
 
-    // join to lower nbr
-    if (p + p->s.size == bp){
-        p->s.size += bp->s.size;
-        p->s.ptr = bp->s.ptr;
+// above psedo is condensed to double if and else-
+                                // if contains info on (if 1 is adjacent)
+                                // else contains logic on (if None is adjacent: else_1 = part 1, else_2 = part_2)
+    // 1. join to upper nbr 
+    // (consume header after p) (merger to left (bp) the right hand side header)
+        // consider-            p ==== gap ==== p->s.ptr ==== p->s.ptr->s.ptr
+            // if bp lies here: p ==== gap bp== p->s.ptr ==== p->s.ptr->s.ptr
+    if (bp + bp->s.size == p-> s.ptr){  // if the; mem location; after last byte of new allocation; is start of free block; (header of free block)
+        bp -> s.size += p->s.ptr->s.size;     // add p->s.ptr size to bp size
+                             // p ==== gap bp================ p->s.ptr->s.ptr
+        bp->s.ptr = p->s.ptr->s.ptr; // skip a header bw    bp and p->s.ptr->s.ptr
     }
     else
-        p->s.ptr = bp;
-    
+        bp->s.ptr = p->s.ptr;   // right block is not adj
+        
+    // join to lower nbr 
+    // (consume bp) (merger to left (p) the right hand side bp)
+            // if bp lies here: p ==bp gap ====(bp->s.ptr)==== p->s.ptr ==== p->s.ptr->s.ptr
+                // consume bp
+    if (p + p->s.size == bp){
+        p->s.size += bp->s.size;    // add bp size to p size
+        p->s.ptr = bp->s.ptr;   // skip header bw   p and bp
+    }
+    else
+        p->s.ptr = bp;  // left block is not adj
+
     freep = p;
 }
 
