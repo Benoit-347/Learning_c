@@ -40,6 +40,10 @@ int main(){
     scanf("%s",inf);
     int temp;
     for(i=0;i<strlen(inf);i++){
+    // only 1 true branch in i=0 to end of expr
+        // when incoming from expr char is not lower precedence than latest in stack, 
+            // mov char to stack
+        // when char is lower than stack, shift elements from top of stack to postfix expr, until it is not lower.
 
         temp = top;
         printf("\nStack now:\n");
@@ -57,6 +61,8 @@ int main(){
         else
             top--;      // skip the '(' in stack, from c- '()' is NULL/redundant
     }
+
+    // after iterating over full infix, shift remaining items in stack to postfix.
     while(s[top]!='#')
         pf[j++]=s[top--];
     pf[j]='\0';
