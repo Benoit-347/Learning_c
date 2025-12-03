@@ -74,9 +74,17 @@ int * get_available(int * total_resource, int * total_alloc, int num_type_r){
     }
     return output;
 }
-
-void request_resource(int * new_request, int process_index, int * available, int num_p, int num_type_r,  int alloc_matrix[num_p][num_type_r], int need_matrix[num_p][num_type_r], int * total_resources_arr){
-    
+void request_resource(
+    int * new_request, 
+    int process_index, 
+    int * available, 
+    int num_p, 
+    int num_type_r,
+    int alloc_matrix[num_p][num_type_r], 
+    int need_matrix[num_p][num_type_r], 
+    int * total_resources_arr,
+    int max_need_matrix[num_p][num_type_r]   // added
+){
     int i;
     
     for (i = 0; i<num_type_r; i++){
@@ -91,48 +99,27 @@ void request_resource(int * new_request, int process_index, int * available, int
         for (i = 0; i< num_type_r; i++){
             alloc_matrix[process_index][i] += new_request[i];
             available[i] -= new_request[i];
-            need_matrix[process_index][i] -= new_request[i];
         }
-    printf("\nNew allocation of experiment %d is:\n", process_index + 1);
-    display_matrix(num_p, num_type_r, alloc_matrix);
+
+        // **** FIX: recompute need here ****
+        get_need_matrix(num_p, num_type_r, need_matrix, max_need_matrix, alloc_matrix);
+
+        printf("New allocation of experiment %d is:\n", process_index + 1);
+        display_matrix(num_p, num_type_r, alloc_matrix);
     
-    printf("\n");
-    // available
-    int * total_alloc_arr = get_total_allocation(num_p, num_type_r, alloc_matrix);
-    printf("The available resources now is: \n");
-    int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
-    display_matrix(1, num_type_r, (int (*)[num_type_r]) total_available_arr);
+        printf("\n");
+
+        int * total_alloc_arr = get_total_allocation(num_p, num_type_r, alloc_matrix);
+        printf("The available resources now is: \n");
+        int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
+        display_matrix(1, num_type_r, (int (*)[num_type_r]) total_available_arr);
     }
     else
         printf("Cannot allocate resource\n");
 }
 
-void show_arm(int n){
-    for (int i = 1; i<=n; i++)
-        printf("Arm_%d\t", i);
-    printf("\n");
-}
-
-void display_alloc_available_need_matrix(int * available, int num_p, int num_type_r, int cur_alloc_matrix[num_p][num_type_r], int need_matrix[num_p][num_type_r], int * total_resources_arr){
-    
-    printf("\nThe current allocation matrix: \n");
-    show_arm(num_type_r);
-    display_matrix(num_p, num_type_r, cur_alloc_matrix);
-    
-    printf("\nThe current available resources are: \n");
-    show_arm(num_type_r);
-    display_matrix(num_p, num_type_r, (int (*)[num_type_r])available);
-
-    printf("\nThe current need matrix is: \n");
-    show_arm(num_type_r);
-    display_matrix(num_p, num_type_r, need_matrix);
-    printf("\n");
-}
-
 int * execute_bankers_algo(int * available, int num_p, int num_type_r, int cur_alloc_matrix[num_p][num_type_r], int need_matrix[num_p][num_type_r], int * total_resources_arr){
 
-    printf("---Normal version! (Does not prempt any process)---\n");
-    printf("START:\n");
     int flag= 1;    // need is empty flag
     int count = 0;
     int old_count;
@@ -157,8 +144,17 @@ int * execute_bankers_algo(int * available, int num_p, int num_type_r, int cur_a
                 arr[i] = 1;
                 output[count] = i;
                 count++;
-                printf("\nExecuted experiment %d sucessfully\n", i+1);
-                display_alloc_available_need_matrix(available,num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
+                printf("Executed experiment %d sucessfully\n\n", i+1);
+                printf("New allocation of arms is:\n");
+                display_matrix(num_p, num_type_r, cur_alloc_matrix);    
+                printf("\n");
+
+                // available
+                int * total_alloc_arr = get_total_allocation(num_p, num_type_r, cur_alloc_matrix);
+                printf("The available resources now is: \n");
+                int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
+                display_matrix(1, num_type_r, (int (*)[num_type_r]) total_available_arr);
+                printf("\n");
             }
         }
         if (old_count == count){
@@ -169,10 +165,10 @@ int * execute_bankers_algo(int * available, int num_p, int num_type_r, int cur_a
     return output;
 }
 
+
 int * execute_prempt_bankers_algo(int * available, int num_p, int num_type_r, int cur_alloc_matrix[num_p][num_type_r], int need_matrix[num_p][num_type_r], 
                                 int * total_resources_arr){
-    printf("---Prempt version! (In case of deadlock, deallocates process and tries to obtain safe seq)---\n");
-    printf("START:\n");
+
     int flag= 1;    // need is empty flag
     int count = 0;
     int old_count;
@@ -189,6 +185,7 @@ int * execute_prempt_bankers_algo(int * available, int num_p, int num_type_r, in
             if (arr[i] == 1)
                 continue;
             for (j = 0; j<num_type_r; j++){
+                printf("Process %d The available [%d]: %d; need[%d]: %d\n", i, j, available[j], j, need_matrix[i][j]);
                 if (available[j] < need_matrix[i][j])
                     break;
             }
@@ -202,23 +199,40 @@ int * execute_prempt_bankers_algo(int * available, int num_p, int num_type_r, in
                 holding_empty[i] =1;
                 output[count] = i;
                 count++;
-                printf("\nExecuted experiment %d sucessfully\n\n", i+1);
-                display_alloc_available_need_matrix(available,num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
-    
+                printf("Executed experiment %d sucessfully\n\n", i+1);
+                printf("New allocation of arms is:\n");
+                display_matrix(num_p, num_type_r, cur_alloc_matrix);
+                printf("\n");
+
+                // available
+                int * total_alloc_arr = get_total_allocation(num_p, num_type_r, cur_alloc_matrix);
+                printf("The available resources now is: \n");
+                int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
+                display_matrix(1, num_type_r, (int (*)[num_type_r]) total_available_arr);
+                printf("\n");
             }
             else if (holding_process == -1 && holding_empty[i] == 0)
                 holding_process = i;
         }
         if (old_count == count){
             if (holding_process != -1){
-                printf("\nThere is lack of resource for any process to execute!\n\nPreempting process %d.\n", holding_process + 1);
+                printf("There is lack of resource for any process to execute! \n\nPreempting process %d.\n\n", holding_process + 1);
                 for (j = 0; j<num_type_r; j++){
                     available[j] += cur_alloc_matrix[holding_process][j];
                     need_matrix[holding_process][j] += cur_alloc_matrix[holding_process][j];
                     cur_alloc_matrix[holding_process][j] = 0;
                     holding_empty[holding_process] = 1;
                 }
-                display_alloc_available_need_matrix(available,num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
+                printf("New allocation of arms is:\n");
+                display_matrix(num_p, num_type_r, cur_alloc_matrix);
+                printf("\n");
+
+                // available
+                int * total_alloc_arr = get_total_allocation(num_p, num_type_r, cur_alloc_matrix);
+                printf("The available resources now is: \n");
+                int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
+                display_matrix(1, num_type_r, (int (*)[num_type_r]) total_available_arr);
+                printf("\n");
             }
             else{
                 printf("Found a deadlock!\n");
@@ -248,41 +262,48 @@ int main(){
     printf("\nEnter number of experiments (processes): ");
     scanf("%d", &num_p);
     printf("\n");
-    // obtain current allocation to processes-
-    int * flat_array = create_matrix(num_p, num_type_r);
-    int (*cur_alloc_matrix)[num_type_r] = (int (*)[num_type_r])flat_array; // enalbe using array[][] format instead of direct pointer usage
+
+    // FIXED: separate allocations (no reuse of flat_array)
+
+    // allocation matrix
+    int *cur_alloc_flat = create_matrix(num_p, num_type_r);
+    int (*cur_alloc_matrix)[num_type_r] = (int (*)[num_type_r])cur_alloc_flat;
     get_allocation_matrix(num_p, num_type_r, cur_alloc_matrix);
-    printf("\n\nThe allocation matrix: \n");
+    printf("\nThe allocation matrix: \n");
     display_matrix(num_p, num_type_r, cur_alloc_matrix);
 
-    // available
-    int * total_alloc_arr = get_total_allocation(num_p, num_type_r, cur_alloc_matrix);
-    printf("\nThe available resources now is: \n");
-    int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
-    display_matrix(1, num_type_r, (int (*)[num_type_r])total_available_arr);
     printf("\n");
-    // obtaining max need of processes-
-    flat_array = create_matrix(num_p, num_type_r);
-    int (*max_need_matrix)[num_type_r] = (int (*)[num_type_r])flat_array;
+    
+    // max need matrix
+    int *max_need_flat = create_matrix(num_p, num_type_r);
+    int (*max_need_matrix)[num_type_r] = (int (*)[num_type_r])max_need_flat;
     get_max_need(num_p, num_type_r, max_need_matrix);
 
-    printf("\n\nThe maximum need matrix:\n");
+    printf("\nThe maximum need matrix:\n");
     display_matrix(num_p, num_type_r, max_need_matrix);
 
-    // obtain need matrix:
-    flat_array = create_matrix(num_p, num_type_r);
-    int (*need_matrix)[num_type_r] = (int (*)[num_type_r])flat_array;
+    printf("\n");
+
+    // need matrix
+    int *need_flat = create_matrix(num_p, num_type_r);
+    int (*need_matrix)[num_type_r] = (int (*)[num_type_r])need_flat;
     get_need_matrix(num_p, num_type_r, need_matrix, max_need_matrix, cur_alloc_matrix);
 
     printf("\nThe need matrix: \n");
     display_matrix(num_p, num_type_r, need_matrix);
 
+    printf("\n");
 
-    // Solution i) When request new resources from system.
+    // available resources
+    int * total_alloc_arr = get_total_allocation(num_p, num_type_r, cur_alloc_matrix);
+    printf("The available resources now is: \n");
+    int * total_available_arr = get_available(total_resources_arr, total_alloc_arr, num_type_r);
+    display_matrix(1, num_type_r, (int (*)[num_type_r])total_available_arr);
+
     int process_id;
     printf("\nEnter which process to request for: ");
     scanf("%d", &process_id);
-    process_id--;   // convert position to index
+    process_id--;
 
     int * request = create_matrix(1, num_type_r);
     printf("Enter the new request for arms (resources):\n");
@@ -291,21 +312,25 @@ int main(){
         scanf("%d", request + i);
     }
 
-    request_resource(request, process_id, total_available_arr, num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
-    
+request_resource(request, process_id, total_available_arr,
+                 num_p, num_type_r, cur_alloc_matrix, need_matrix,
+                 total_resources_arr, max_need_matrix);
 
-    printf("\n\n---Starting bankers algorithm---\n\n");
-    int * output = execute_prempt_bankers_algo(total_available_arr, num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
+    
+    printf("\n---Starting bankers algorithm---\n\n");
+
+    int * output = execute_bankers_algo(total_available_arr, num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
+    // int * output = execute_prempt_bankers_algo(total_available_arr, num_p, num_type_r, cur_alloc_matrix, need_matrix, total_resources_arr);
 
     if (!output)
         printf("Not a safe sequence!\n");
     
     else{
-        printf("\n---RESULT---:\n\nThe safe seq is: ");
+        printf("The safe seq is: ");
         for (int i = 0; i<num_p; i++)
             printf("> experiment %d ", output[i] + 1);
     }
 
-    printf("\n\nEnd of program!\n\n");
+    printf("\nEnd of program!\n");
     return 0;
 }
