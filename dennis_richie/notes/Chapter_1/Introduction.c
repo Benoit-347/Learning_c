@@ -1,3 +1,6 @@
+// In c for complex And OR large codes, we need a little abractness, with functions and such.
+// With higer abstraction, there would be little overhead. This overhead when abstracting can be ignored, when using abstractness optimized c++ code.
+
 //Data represented in quantity in computer memory, thinking/computing done by addidtion/subtraction/cmp operantions by cpu, conntrolle by cpu architecture.
 
 //The cpu instructions done in machine code, promted by assembly code.
