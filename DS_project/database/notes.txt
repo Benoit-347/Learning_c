@@ -1,0 +1,21 @@
+Hash tables - Convert Unique ids to a LARGE int value, from which a index position is obtained. Stores the key-value at this index.
+Every subsequent key at same index is also sotred here.
+    Pros-
+        It has higher mean speed to access keys compared to binary trees. (Not used in most databases)
+    
+    Cons-
+        It ONLY does complete match chk, no prefixes can be matched (you have to do a linear seach of all nodes of hash map if you intend to do a prefix search)
+        It does not preserve sorted order
+        It does NOT take much advantage of system/CPU cache (as chaining consists of pointers, which is a random adress of data locations; Hence does bad in spatial cache use)
+        Its performace while mostly O(1) at full match, has UNPREDICTABLE O(n) spikes.
+        It does well only when key is small. (hash cost linearly grows with key length)
+
+Binary trees (Or our tree structure):
+    Pros- 
+        It maintains sorted order.
+        It allows searching for prefixes of keys (so basic filter option)
+        It takes advantage of CPU cache. (as its progression is its inside cases have sequential memory allocations; Trees tend to walk adjacent memory and has a structured traversal; whereas a hashtable after its first index points to unrelated memory)
+        It has predictable performace.
+
+    Cons-
+        It has slower mean speed than a hashtable for a exact full match.

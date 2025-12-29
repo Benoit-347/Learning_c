@@ -1,0 +1,95 @@
+Makefile
+
+# Makefile for Zero-Copy TCP/IP Stack + Redis Server
+# 
+# This Makefile compiles the complete project with appropriate
+# optimization flags and warnings.
+
+CC = gcc
+CFLAGS = -Wall -Wextra -Wpedantic -std=gnu11 -O2 -g
+CFLAGS += -D_GNU_SOURCE
+LDFLAGS = -lpthread -lm
+
+# Source files
+SRCS = redis_tcp_server.c
+
+# Object files
+OBJS = $(SRCS:.c=.o)
+
+# Output binary
+TARGET = redis-tcp-server
+
+# Default target
+all: $(TARGET)
+
+# Compile main binary
+$(TARGET): $(OBJS)
+	@echo "Linking $(TARGET)..."
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "Build complete: $(TARGET)"
+
+# Compile object files
+%.o: %.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	rm -f $(OBJS) $(TARGET)
+	@echo "Clean complete"
+
+# Run the server (requires root)
+run: $(TARGET)
+	@echo "Running server (requires root privileges)..."
+	sudo ./$(TARGET) --interface lo --ip 127.0.0.1 --port 6379 --log-level 3
+
+# Run with custom interface
+run-eth0: $(TARGET)
+	@echo "Running server on eth0..."
+	sudo ./$(TARGET) --interface eth0 --ip 192.168.1.100 --port 6379 --log-level 2
+
+# Install dependencies (Debian/Ubuntu)
+deps:
+	@echo "Installing development dependencies..."
+	sudo apt-get update
+	sudo apt-get install -y build-essential gcc make git
+
+# Check if running as root
+check-root:
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "ERROR: This program requires root privileges to open raw sockets."; \
+		echo "Please run with sudo or as root user."; \
+		exit 1; \
+	fi
+
+# Format code (requires clang-format)
+format:
+	@echo "Formatting code..."
+	clang-format -i $(SRCS)
+
+# Run static analysis (requires cppcheck)
+analyze:
+	@echo "Running static analysis..."
+	cppcheck --enable=all --suppress=missingIncludeSystem $(SRCS)
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all        - Build the server (default)"
+	@echo "  clean      - Remove build artifacts"
+	@echo "  run        - Run server on loopback interface"
+	@echo "  run-eth0   - Run server on eth0 interface"
+	@echo "  deps       - Install development dependencies"
+	@echo "  format     - Format code with clang-format"
+	@echo "  analyze    - Run static analysis with cppcheck"
+	@echo "  help       - Show this help message"
+	@echo ""
+	@echo "Usage examples:"
+	@echo "  make              # Build the project"
+	@echo "  make clean        # Clean build files"
+	@echo "  sudo make run     # Run on loopback"
+	@echo ""
+	@echo "Note: Running the server requires root privileges!"
+
+.PHONY: all clean run run-eth0 deps check-root format analyze help

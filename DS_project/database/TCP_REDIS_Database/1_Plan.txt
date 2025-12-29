@@ -1,0 +1,1548 @@
+Plan:
+
+# Zero-Copy TCP/IP Stack + Redis-like In-Memory Database
+## Complete Systems Engineering Plan
+
+---
+
+## Executive Summary
+
+This document details a learning-focused, high-performance C project that implements:
+1. A **kernel-bypass network stack** (Ethernet/IP/TCP) using AF_PACKET/AF_XDP
+2. A **Redis-compatible in-memory database** with RESP protocol support
+3. **Zero-copy I/O** eliminating kernel context switches and memory copies
+
+**Performance Targets:**
+- Sub-microsecond packet processing (vs. ~10μs kernel overhead)
+- 1M+ ops/sec throughput on modest hardware
+- p99 latency <100μs for GET/SET operations
+- Eliminate 2+ context switches per packet vs. standard sockets
+
+---
+
+## Part 1: Architecture Overview
+
+### 1.1 System Layers (Bottom to Top)
+
+```
+┌─────────────────────────────────────────────────┐
+│  Client (redis-cli, applications)              │
+└─────────────────────────────────────────────────┘
+                      │ RESP Protocol
+┌─────────────────────────────────────────────────┐
+│  Command Processor & Data Engine                │
+│  - Hash Tables (Robin Hood probing)             │
+│  - Lists (Quicklist), Sets, Sorted Sets         │
+│  - Expiration (Timing Wheel)                    │
+└─────────────────────────────────────────────────┘
+                      │
+┌─────────────────────────────────────────────────┐
+│  RESP Parser (State Machine)                    │
+│  - Length-prefixed parsing, zero-copy           │
+└─────────────────────────────────────────────────┘
+                      │
+┌─────────────────────────────────────────────────┐
+│  TCP Stack (Userspace)                          │
+│  - State machine (SYN/ACK/FIN)                  │
+│  - Sliding window, retransmits                  │
+│  - Sequence tracking, reordering buffers        │
+└─────────────────────────────────────────────────┘
+                      │
+┌─────────────────────────────────────────────────┐
+│  IP Layer                                       │
+│  - IPv4 parsing, checksum validation           │
+│  - ARP resolution, ICMP echo (ping)             │
+└─────────────────────────────────────────────────┘
+                      │
+┌─────────────────────────────────────────────────┐
+│  Ethernet Layer                                 │
+│  - Frame parsing (802.3)                        │
+│  - MAC filtering                                │
+└─────────────────────────────────────────────────┘
+                      │
+┌─────────────────────────────────────────────────┐
+│  Kernel-Bypass I/O (AF_PACKET → AF_XDP/DPDK)   │
+│  - Memory-mapped NIC rings (zero-copy)          │
+│  - Batch processing (64-256 packets/poll)       │
+└─────────────────────────────────────────────────┘
+                      │
+                 [NIC Hardware]
+```
+
+### 1.2 Threading Model (Multi-Core Sharding)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Acceptor Thread                       │
+│  - Listens for SYN packets                               │
+│  - Computes shard: hash(client_ip:port) % num_cores     │
+│  - Routes new connections to shard threads               │
+└──────────────────────────────────────────────────────────┘
+           │           │           │           │
+    ┌──────┴──────┬────┴────┬──────┴──────┬───┴──────┐
+    │             │         │             │          │
+┌───▼────┐  ┌─────▼───┐ ┌──▼─────┐  ┌────▼────┐ ...
+│ Shard0 │  │ Shard1  │ │ Shard2 │  │ Shard3  │
+│ CPU 0  │  │ CPU 1   │ │ CPU 2  │  │ CPU 3   │
+├────────┤  ├─────────┤ ├────────┤  ├─────────┤
+│ Epoll  │  │ Epoll   │ │ Epoll  │  │ Epoll   │
+│ Hash   │  │ Hash    │ │ Hash   │  │ Hash    │
+│ Tables │  │ Tables  │ │ Tables │  │ Tables  │
+└────────┘  └─────────┘ └────────┘  └─────────┘
+
+Each shard owns:
+- Its own hash table partition (keyspace % num_shards)
+- Its own TCP connections
+- Lock-free operation for single-key commands
+```
+
+---
+
+## Part 2: Network Stack Implementation
+
+### 2.1 Kernel-Bypass I/O Progression
+
+**Phase 1: AF_PACKET (Raw Socket Baseline)**
+```c
+// Open raw socket for learning/testing
+int sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+struct sockaddr_ll addr = {
+    .sll_family = AF_PACKET,
+    .sll_protocol = htons(ETH_P_ALL),
+    .sll_ifindex = if_nametoindex("eth0")
+};
+bind(sock, (struct sockaddr*)&addr, sizeof(addr));
+
+// Read raw frames
+uint8_t buffer[2048];
+ssize_t len = recvfrom(sock, buffer, sizeof(buffer), 0, NULL, NULL);
+```
+
+**Performance:** ~500K pps, still uses kernel for packet delivery
+
+**Phase 2: AF_XDP (Zero-Copy)**
+```c
+// XDP socket with UMEM (user memory) for zero-copy
+struct xsk_socket_info {
+    struct xsk_ring_prod tx;
+    struct xsk_ring_cons rx;
+    struct xsk_umem_info *umem;
+    // ... XDP metadata
+};
+
+// Memory-mapped rings: NIC writes directly to userspace
+void* umem_area = mmap(NULL, UMEM_SIZE, PROT_READ|PROT_WRITE, 
+                       MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+// Poll for packets (batched)
+uint32_t idx_rx;
+size_t rcvd = xsk_ring_cons__peek(&xsk->rx, BATCH_SIZE, &idx_rx);
+for (int i = 0; i < rcvd; i++) {
+    const struct xdp_desc *desc = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++);
+    uint8_t *pkt = xsk_umem__get_data(xsk->umem->buffer, desc->addr);
+    process_packet(pkt, desc->len);
+}
+xsk_ring_cons__release(&xsk->rx, rcvd);
+```
+
+**Performance:** 10M+ pps, true zero-copy
+
+### 2.2 Protocol Headers (Packed Structs)
+
+```c
+// Ethernet (RFC 802.3)
+struct __attribute__((packed)) eth_hdr {
+    uint8_t  dst_mac[6];
+    uint8_t  src_mac[6];
+    uint16_t ethertype;  // 0x0800 = IPv4, 0x0806 = ARP
+};
+
+// IPv4 (RFC 791)
+struct __attribute__((packed)) ipv4_hdr {
+    uint8_t  version_ihl;    // version=4, IHL=header len in 32-bit words
+    uint8_t  tos;
+    uint16_t total_length;
+    uint16_t id;
+    uint16_t flags_fragment;
+    uint8_t  ttl;
+    uint8_t  protocol;       // 6=TCP, 1=ICMP
+    uint16_t checksum;
+    uint32_t src_ip;
+    uint32_t dst_ip;
+};
+
+// TCP (RFC 793)
+struct __attribute__((packed)) tcp_hdr {
+    uint16_t src_port;
+    uint16_t dst_port;
+    uint32_t seq_num;
+    uint32_t ack_num;
+    uint8_t  data_offset_flags;  // upper 4 bits = offset (words)
+    uint8_t  flags;              // SYN=0x02, ACK=0x10, FIN=0x01
+    uint16_t window;
+    uint16_t checksum;
+    uint16_t urgent_ptr;
+};
+```
+
+### 2.3 Packet Processing Pipeline
+
+```c
+void process_raw_packet(uint8_t *frame, size_t len) {
+    struct eth_hdr *eth = (struct eth_hdr*)frame;
+    
+    // Filter by ethertype
+    if (ntohs(eth->ethertype) == 0x0806) {
+        handle_arp(frame + sizeof(struct eth_hdr));
+        return;
+    }
+    if (ntohs(eth->ethertype) != 0x0800) return;  // Not IPv4
+    
+    struct ipv4_hdr *ip = (struct ipv4_hdr*)(frame + sizeof(struct eth_hdr));
+    
+    // Validate checksum
+    if (!ipv4_checksum_valid(ip)) {
+        stats.ip_checksum_errors++;
+        return;
+    }
+    
+    // Extract IP header length
+    uint8_t ihl = (ip->version_ihl & 0x0F) * 4;  // Convert words to bytes
+    
+    if (ip->protocol == 1) {  // ICMP
+        handle_icmp(ip, (uint8_t*)ip + ihl);
+        return;
+    }
+    if (ip->protocol != 6) return;  // Not TCP
+    
+    struct tcp_hdr *tcp = (struct tcp_hdr*)((uint8_t*)ip + ihl);
+    
+    // Validate TCP checksum (includes pseudo-header)
+    if (!tcp_checksum_valid(ip, tcp)) {
+        stats.tcp_checksum_errors++;
+        return;
+    }
+    
+    // Extract TCP data offset
+    uint8_t tcp_hdr_len = ((tcp->data_offset_flags >> 4) & 0x0F) * 4;
+    uint8_t *payload = (uint8_t*)tcp + tcp_hdr_len;
+    size_t payload_len = ntohs(ip->total_length) - ihl - tcp_hdr_len;
+    
+    // Pass to TCP state machine
+    tcp_input(ip->src_ip, ntohs(tcp->src_port), 
+              ip->dst_ip, ntohs(tcp->dst_port),
+              ntohl(tcp->seq_num), ntohl(tcp->ack_num),
+              tcp->flags, payload, payload_len);
+}
+```
+
+### 2.4 TCP State Machine
+
+```c
+enum tcp_state {
+    TCP_CLOSED,
+    TCP_LISTEN,
+    TCP_SYN_RCVD,
+    TCP_ESTABLISHED,
+    TCP_FIN_WAIT_1,
+    TCP_FIN_WAIT_2,
+    TCP_CLOSE_WAIT,
+    TCP_CLOSING,
+    TCP_LAST_ACK,
+    TCP_TIME_WAIT
+};
+
+struct tcp_connection {
+    uint32_t local_ip, remote_ip;
+    uint16_t local_port, remote_port;
+    
+    enum tcp_state state;
+    
+    // Sequence tracking
+    uint32_t snd_una;     // Oldest unACKed seq
+    uint32_t snd_nxt;     // Next seq to send
+    uint32_t rcv_nxt;     // Next expected seq
+    uint16_t rcv_wnd;     // Receive window
+    
+    // Buffers (circular)
+    uint8_t  recv_buf[65536];
+    uint32_t recv_head, recv_tail;
+    
+    uint8_t  send_buf[65536];
+    uint32_t send_head, send_tail;
+    
+    // Retransmission
+    struct timer retrans_timer;
+    uint64_t rto_us;      // Retransmit timeout (microseconds)
+};
+
+void tcp_input(uint32_t src_ip, uint16_t src_port, 
+               uint32_t dst_ip, uint16_t dst_port,
+               uint32_t seq, uint32_t ack, uint8_t flags,
+               uint8_t *data, size_t len) {
+    
+    struct tcp_connection *conn = find_connection(src_ip, src_port, 
+                                                   dst_ip, dst_port);
+    
+    switch (conn ? conn->state : TCP_LISTEN) {
+    case TCP_LISTEN:
+        if (flags & TCP_SYN) {
+            // Create new connection
+            conn = create_connection(dst_ip, dst_port, src_ip, src_port);
+            conn->rcv_nxt = seq + 1;
+            conn->state = TCP_SYN_RCVD;
+            
+            // Send SYN+ACK
+            send_tcp_packet(conn, TCP_SYN | TCP_ACK, 
+                           generate_isn(), conn->rcv_nxt, NULL, 0);
+        }
+        break;
+        
+    case TCP_SYN_RCVD:
+        if ((flags & TCP_ACK) && ack == conn->snd_nxt) {
+            conn->state = TCP_ESTABLISHED;
+            // Connection ready for data
+        }
+        break;
+        
+    case TCP_ESTABLISHED:
+        if (flags & TCP_ACK) {
+            // Update send window
+            if (SEQ_GT(ack, conn->snd_una)) {
+                conn->snd_una = ack;
+                cancel_retransmit_timer(conn);
+            }
+        }
+        
+        if (len > 0 && seq == conn->rcv_nxt) {
+            // In-order data
+            memcpy(conn->recv_buf + conn->recv_tail, data, len);
+            conn->recv_tail = (conn->recv_tail + len) % sizeof(conn->recv_buf);
+            conn->rcv_nxt += len;
+            
+            // Send ACK
+            send_tcp_packet(conn, TCP_ACK, conn->snd_nxt, conn->rcv_nxt, 
+                           NULL, 0);
+            
+            // Process application data (RESP)
+            process_resp_data(conn);
+        } else if (len > 0) {
+            // Out-of-order: buffer for later reassembly
+            buffer_ooo_segment(conn, seq, data, len);
+        }
+        
+        if (flags & TCP_FIN) {
+            conn->rcv_nxt++;
+            conn->state = TCP_CLOSE_WAIT;
+            send_tcp_packet(conn, TCP_ACK, conn->snd_nxt, conn->rcv_nxt, 
+                           NULL, 0);
+        }
+        break;
+        
+    // ... other states (FIN handling, TIME_WAIT, etc.)
+    }
+}
+```
+
+### 2.5 Checksums (IP and TCP)
+
+```c
+uint16_t ipv4_checksum(struct ipv4_hdr *ip) {
+    uint32_t sum = 0;
+    uint16_t *ptr = (uint16_t*)ip;
+    int len = (ip->version_ihl & 0x0F) * 4;  // Header length in bytes
+    
+    // Save and zero checksum field
+    uint16_t old_csum = ip->checksum;
+    ip->checksum = 0;
+    
+    for (int i = 0; i < len / 2; i++) {
+        sum += ntohs(ptr[i]);
+    }
+    
+    // Fold carries
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    
+    ip->checksum = old_csum;  // Restore
+    return (uint16_t)~sum;
+}
+
+uint16_t tcp_checksum(struct ipv4_hdr *ip, struct tcp_hdr *tcp, size_t tcp_len) {
+    // TCP checksum includes pseudo-header
+    uint32_t sum = 0;
+    
+    // Pseudo-header: src_ip, dst_ip, protocol, tcp_length
+    sum += (ip->src_ip >> 16) & 0xFFFF;
+    sum += ip->src_ip & 0xFFFF;
+    sum += (ip->dst_ip >> 16) & 0xFFFF;
+    sum += ip->dst_ip & 0xFFFF;
+    sum += htons(ip->protocol);
+    sum += htons(tcp_len);
+    
+    // TCP header + data
+    uint16_t *ptr = (uint16_t*)tcp;
+    tcp->checksum = 0;
+    
+    for (size_t i = 0; i < tcp_len / 2; i++) {
+        sum += ntohs(ptr[i]);
+    }
+    
+    if (tcp_len & 1) {
+        sum += ((uint8_t*)tcp)[tcp_len - 1] << 8;
+    }
+    
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    
+    return (uint16_t)~sum;
+}
+```
+
+---
+
+## Part 3: RESP Protocol Parser
+
+### 3.1 RESP2 Format
+
+```
+Simple String:  +OK\r\n
+Error:          -ERR unknown command\r\n
+Integer:        :1000\r\n
+Bulk String:    $6\r\nfoobar\r\n  (length-prefixed)
+Array:          *2\r\n$3\r\nGET\r\n$3\r\nkey\r\n
+```
+
+### 3.2 Zero-Copy Streaming Parser
+
+```c
+enum resp_state {
+    RESP_TYPE,           // Reading type byte (+, -, :, $, *)
+    RESP_LENGTH,         // Reading length/integer
+    RESP_BULK_DATA,      // Reading bulk string payload
+    RESP_ARRAY_ELEMENTS  // Reading array elements
+};
+
+struct resp_parser {
+    enum resp_state state;
+    
+    // Current token
+    int type;           // '+', '-', ':', '$', '*'
+    int64_t length;     // For bulk strings, arrays
+    
+    // Array handling
+    int array_depth;
+    int elements_remaining[8];  // Stack for nested arrays
+    
+    // Bulk string zero-copy pointer
+    uint8_t *bulk_ptr;
+    size_t bulk_remaining;
+    
+    // Command buffer
+    struct {
+        uint8_t *args[32];  // Pointers into recv buffer (no copy!)
+        size_t arg_lens[32];
+        int argc;
+    } cmd;
+};
+
+int parse_resp(struct resp_parser *p, uint8_t *buf, size_t len) {
+    size_t i = 0;
+    
+    while (i < len) {
+        switch (p->state) {
+        case RESP_TYPE:
+            p->type = buf[i++];
+            p->length = 0;
+            
+            if (p->type == '+' || p->type == '-') {
+                // Simple string/error: read until \r\n
+                p->state = RESP_LENGTH;  // Reuse for line reading
+            } else if (p->type == ':') {
+                p->state = RESP_LENGTH;  // Read integer
+            } else if (p->type == '$') {
+                p->state = RESP_LENGTH;  // Read bulk string length
+            } else if (p->type == '*') {
+                p->state = RESP_LENGTH;  // Read array size
+            }
+            break;
+            
+        case RESP_LENGTH:
+            // Read digits until \r\n
+            if (buf[i] >= '0' && buf[i] <= '9') {
+                p->length = p->length * 10 + (buf[i] - '0');
+                i++;
+            } else if (buf[i] == '\r' && i+1 < len && buf[i+1] == '\n') {
+                i += 2;  // Skip \r\n
+                
+                if (p->type == '$') {
+                    // Start reading bulk string data
+                    p->bulk_ptr = buf + i;
+                    p->bulk_remaining = p->length;
+                    p->state = RESP_BULK_DATA;
+                } else if (p->type == '*') {
+                    // Start array
+                    p->elements_remaining[p->array_depth++] = p->length;
+                    p->state = RESP_TYPE;
+                    
+                    if (p->array_depth == 1) {
+                        p->cmd.argc = 0;  // New command
+                    }
+                } else {
+                    p->state = RESP_TYPE;  // Done with this token
+                }
+            } else {
+                return -1;  // Parse error
+            }
+            break;
+            
+        case RESP_BULK_DATA:
+            // Zero-copy: just advance pointer
+            size_t chunk = (len - i < p->bulk_remaining) ? 
+                          (len - i) : p->bulk_remaining;
+            
+            if (p->bulk_remaining == p->length) {
+                // First chunk: save pointer (no memcpy!)
+                p->cmd.args[p->cmd.argc] = p->bulk_ptr;
+                p->cmd.arg_lens[p->cmd.argc] = p->length;
+                p->cmd.argc++;
+            }
+            
+            i += chunk;
+            p->bulk_remaining -= chunk;
+            
+            if (p->bulk_remaining == 0) {
+                // Expect \r\n
+                if (i+1 < len && buf[i] == '\r' && buf[i+1] == '\n') {
+                    i += 2;
+                    p->elements_remaining[p->array_depth - 1]--;
+                    
+                    if (p->elements_remaining[p->array_depth - 1] == 0) {
+                        p->array_depth--;
+                        if (p->array_depth == 0) {
+                            // Complete command!
+                            return i;  // Bytes consumed
+                        }
+                    }
+                    p->state = RESP_TYPE;
+                }
+            }
+            break;
+        }
+    }
+    
+    return 0;  // Need more data
+}
+```
+
+**Key Optimization:** Arguments point directly into the TCP receive buffer—no string copies!
+
+---
+
+## Part 4: Data Structures
+
+### 4.1 Robin Hood Hash Table
+
+**Algorithm:** Open addressing with linear probing. On collision, swap entries to minimize probe distances (PSL = Probe Sequence Length).
+
+```c
+#define INITIAL_SIZE 1024
+#define LOAD_FACTOR 0.7
+
+struct hash_entry {
+    uint64_t hash;        // Full hash for quick comparison
+    uint8_t *key;
+    size_t key_len;
+    struct db_value *value;
+    uint8_t psl;          // Probe sequence length
+};
+
+struct hash_table {
+    struct hash_entry *entries;
+    size_t capacity;      // Always power of 2
+    size_t count;
+    size_t mask;          // capacity - 1
+};
+
+uint64_t hash_key(const uint8_t *key, size_t len) {
+    // SipHash or xxHash for quality
+    uint64_t h = 0xcbf29ce484222325ULL;  // FNV-1a basis
+    for (size_t i = 0; i < len; i++) {
+        h ^= key[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+struct db_value* hash_get(struct hash_table *ht, 
+                          const uint8_t *key, size_t key_len) {
+    uint64_t hash = hash_key(key, key_len);
+    size_t idx = hash & ht->mask;
+    uint8_t psl = 0;
+    
+    while (ht->entries[idx].key != NULL) {
+        struct hash_entry *e = &ht->entries[idx];
+        
+        // Early exit: if our PSL exceeds theirs, key doesn't exist
+        if (psl > e->psl) return NULL;
+        
+        // Check hash first (fast), then key (slow)
+        if (e->hash == hash && 
+            e->key_len == key_len &&
+            memcmp(e->key, key, key_len) == 0) {
+            return e->value;
+        }
+        
+        idx = (idx + 1) & ht->mask;
+        psl++;
+    }
+    
+    return NULL;  // Not found
+}
+
+void hash_set(struct hash_table *ht, 
+              const uint8_t *key, size_t key_len,
+              struct db_value *value) {
+    
+    // Resize if load factor exceeded
+    if ((double)ht->count / ht->capacity > LOAD_FACTOR) {
+        hash_resize(ht, ht->capacity * 2);
+    }
+    
+    uint64_t hash = hash_key(key, key_len);
+    size_t idx = hash & ht->mask;
+    
+    struct hash_entry new_entry = {
+        .hash = hash,
+        .key = malloc(key_len),
+        .key_len = key_len,
+        .value = value,
+        .psl = 0
+    };
+    memcpy(new_entry.key, key, key_len);
+    
+    while (1) {
+        if (ht->entries[idx].key == NULL) {
+            // Empty slot
+            ht->entries[idx] = new_entry;
+            ht->count++;
+            return;
+        }
+        
+        // Robin Hood: steal from the rich
+        if (new_entry.psl > ht->entries[idx].psl) {
+            struct hash_entry tmp = ht->entries[idx];
+            ht->entries[idx] = new_entry;
+            new_entry = tmp;
+        }
+        
+        idx = (idx + 1) & ht->mask;
+        new_entry.psl++;
+    }
+}
+
+void hash_delete(struct hash_table *ht, 
+                 const uint8_t *key, size_t key_len) {
+    // Find entry
+    uint64_t hash = hash_key(key, key_len);
+    size_t idx = hash & ht->mask;
+    uint8_t psl = 0;
+    
+    while (ht->entries[idx].key != NULL) {
+        struct hash_entry *e = &ht->entries[idx];
+        
+        if (psl > e->psl) return;  // Not found
+        
+        if (e->hash == hash && 
+            e->key_len == key_len &&
+            memcmp(e->key, key, key_len) == 0) {
+            
+            free(e->key);
+            // Backshift deletion
+            size_t curr = idx;
+            while (1) {
+                size_t next = (curr + 1) & ht->mask;
+                if (ht->entries[next].key == NULL || 
+                    ht->entries[next].psl == 0) {
+                    ht->entries[curr].key = NULL;
+                    ht->count--;
+                    return;
+                }
+                
+                ht->entries[curr] = ht->entries[next];
+                ht->entries[curr].psl--;
+                curr = next;
+            }
+        }
+        
+        idx = (idx + 1) & ht->mask;
+        psl++;
+    }
+}
+```
+
+**Performance:** Average 1.3 probes for lookups at 70% load, excellent cache locality.
+
+### 4.2 Quicklist (Redis-style Lists)
+
+**Structure:** Linked list of small arrays (ziplists). Each node is a contiguous block.
+
+```c
+#define ZIPLIST_MAX_ENTRIES 128
+#define ZIPLIST_MAX_BYTES 8192
+
+struct ziplist {
+    size_t count;
+    size_t total_bytes;
+    struct {
+        size_t len;
+        uint8_t data[];  // Flexible array member
+    } entries[];  // Inline allocation
+};
+
+struct quicklist_node {
+    struct ziplist *zl;
+    struct quicklist_node *prev;
+    struct quicklist_node *next;
+};
+
+struct quicklist {
+    struct quicklist_node *head;
+    struct quicklist_node *tail;
+    size_t count;  // Total elements across all nodes
+};
+
+void quicklist_push_head(struct quicklist *ql, 
+                         const uint8_t *data, size_t len) {
+    if (ql->head == NULL || 
+        ql->head->zl->count >= ZIPLIST_MAX_ENTRIES ||
+        ql->head->zl->total_bytes + len > ZIPLIST_MAX_BYTES) {
+        
+        // Allocate new node
+        struct quicklist_node *node = malloc(sizeof(*node));
+        node->zl = ziplist_new();
+        node->prev = NULL;
+        node->next = ql->head;
+        
+        if (ql->head) ql->head->prev = node;
+        else ql->tail = node;
+        
+        ql->head = node;
+    }
+    
+    ziplist_insert(ql->head->zl, 0, data, len);
+    ql->count++;
+}
+
+uint8_t* quicklist_pop_head(struct quicklist *ql, size_t *len_out) {
+    if (ql->head == NULL) return NULL;
+    
+    uint8_t *data = ziplist_remove(ql->head->zl, 0, len_out);
+    ql->count--;
+    
+    // Free empty nodes
+    if (ql->head->zl->count == 0) {
+        struct quicklist_node *node = ql->head;
+        ql->head = node->next;
+        if (ql->head) ql->head->prev = NULL;
+        else ql->tail = NULL;
+        
+        free(node->zl);
+        free(node);
+    }
+    
+    return data;
+}
+
+// LRANGE: iterate efficiently
+void quicklist_range(struct quicklist *ql, int start, int stop,
+                     void (*callback)(const uint8_t *data, size_t len)) {
+    struct quicklist_node *node = ql->head;
+    int idx = 0;
+    
+    while (node && idx <= stop) {
+        for (size_t i = 0; i < node->zl->count && idx <= stop; i++, idx++) {
+            if (idx >= start) {
+                // Access entry directly (cache-friendly)
+                callback(node->zl->entries[i].data, 
+                        node->zl->entries[i].len);
+            }
+        }
+        node = node->next;
+    }
+}
+```
+
+**Benefits:** O(1) push/pop, good cache locality for iteration, memory-efficient packing.
+
+### 4.3 Sorted Set (Skiplist + Hash)
+
+```c
+#define SKIPLIST_MAX_LEVEL 32
+
+struct skiplist_node {
+    double score;
+    uint8_t *member;
+    size_t member_len;
+    struct skiplist_node *forward[]; // Flexible array (levels)
+};
+
+struct sorted_set {
+    struct skiplist_node *header;
+    struct hash_table *dict;  // member -> score lookup
+    int level;  // Current max level
+    size_t count;
+};
+
+int random_level() {
+    int lvl = 1;
+    while (rand() < RAND_MAX/4 && lvl < SKIPLIST_MAX_LEVEL) lvl++;
+    return lvl;
+}
+
+void zset_add(struct sorted_set *zs, const uint8_t *member, 
+              size_t len, double score) {
+    struct skiplist_node *update[SKIPLIST_MAX_LEVEL];
+    struct skiplist_node *x = zs->header;
+    
+    // Find insertion point
+    for (int i = zs->level - 1; i >= 0; i--) {
+        while (x->forward[i] && 
+               (x->forward[i]->score < score ||
+                (x->forward[i]->score == score &&
+                 memcmp(x->forward[i]->member, member, len) < 0))) {
+            x = x->forward[i];
+        }
+        update[i] = x;
+    }
+    
+    // Insert new node
+    int lvl = random_level();
+    if (lvl > zs->level) {
+        for (int i = zs->level; i < lvl; i++) {
+            update[i] = zs->header;
+        }
+        zs->level = lvl;
+    }
+    
+    struct skiplist_node *node = malloc(
+        sizeof(*node) + lvl * sizeof(struct skiplist_node*));
+    node->score = score;
+    node->member = malloc(len);
+    memcpy(node->member, member, len);
+    node->member_len = len;
+    
+    for (int i = 0; i < lvl; i++) {
+        node->forward[i] = update[i]->forward[i];
+        update[i]->forward[i] = node;
+    }
+    
+    // Update hash table
+    hash_set(zs->dict, member, len, (void*)(uintptr_t)score);
+    zs->count++;
+}
+
+// ZRANGE: traverse forward pointers
+void zset_range(struct sorted_set *zs, int start, int stop,
+                void (*callback)(const uint8_t *member, double score)) {
+    struct skiplist_node *x = zs->header->forward[0];
+    int idx = 0;
+    
+    while (x && idx <= stop) {
+        if (idx >= start) {
+            callback(x->member, x->score);
+        }
+        x = x->forward[0];
+        idx++;
+    }
+}
+```
+
+**Complexity:** O(log N) add/remove, O(log N + M) range queries.
+
+### 4.4 Timing Wheel (Expiration)
+
+```c
+#define WHEEL_SIZE 256
+#define TICK_MS 100  // 100ms granularity
+
+struct timer_entry {
+    uint64_t expire_tick;
+    uint8_t *key;
+    size_t key_len;
+    struct timer_entry *next;
+};
+
+struct timing_wheel {
+    struct timer_entry *slots[WHEEL_SIZE];
+    uint64_t current_tick;
+};
+
+void tw_add_timer(struct timing_wheel *tw, const uint8_t *key, 
+                  size_t key_len, uint64_t ttl_ms) {
+    uint64_t expire_tick = tw->current_tick + (ttl_ms / TICK_MS);
+    size_t slot = expire_tick % WHEEL_SIZE;
+    
+    struct timer_entry *e = malloc(sizeof(*e));
+    e->expire_tick = expire_tick;
+    e->key = malloc(key_len);
+    memcpy(e->key, key, key_len);
+    e->key_len = key_len;
+    
+    // Insert at head (O(1))
+    e->next = tw->slots[slot];
+    tw->slots[slot] = e;
+}
+
+void tw_tick(struct timing_wheel *tw, struct hash_table *ht) {
+    tw->current_tick++;
+    size_t slot = tw->current_tick % WHEEL_SIZE;
+    
+    struct timer_entry *e = tw->slots[slot];
+    struct timer_entry **prev = &tw->slots[slot];
+    
+    while (e) {
+        if (e->expire_tick <= tw->current_tick) {
+            // Expired: delete from hash table
+            hash_delete(ht, e->key, e->key_len);
+            
+            struct timer_entry *next = e->next;
+            free(e->key);
+            free(e);
+            *prev = next;
+            e = next;
+        } else {
+            prev = &e->next;
+            e = e->next;
+        }
+    }
+}
+```
+
+**Performance:** O(1) amortized inserts, O(N_expired) per tick.
+
+---
+
+## Part 5: Command Processing
+
+### 5.1 Command Dispatcher
+
+```c
+typedef void (*cmd_handler)(struct tcp_connection *conn, 
+                            uint8_t **args, size_t *arg_lens, int argc);
+
+struct command_entry {
+    const char *name;
+    int arity;  // -2 = at least 1 arg, 3 = exactly 2 args, etc.
+    cmd_handler handler;
+};
+
+struct command_entry commands[] = {
+    {"PING", -1, cmd_ping},
+    {"ECHO", 2, cmd_echo},
+    {"SET", 3, cmd_set},
+    {"GET", 2, cmd_get},
+    {"DEL", -2, cmd_del},
+    {"LPUSH", -3, cmd_lpush},
+    {"RPUSH", -3, cmd_rpush},
+    {"LPOP", 2, cmd_lpop},
+    {"RPOP", 2, cmd_rpop},
+    {"LRANGE", 4, cmd_lrange},
+    {"ZADD", -4, cmd_zadd},
+    {"ZRANGE", -4, cmd_zrange},
+    {NULL, 0, NULL}
+};
+
+void dispatch_command(struct tcp_connection *conn, 
+                      uint8_t **args, size_t *arg_lens, int argc) {
+    if (argc == 0) return;
+    
+    // Find command (case-insensitive)
+    for (int i = 0; commands[i].name; i++) {
+        if (strncasecmp((char*)args[0], commands[i].name, 
+                        arg_lens[0]) == 0) {
+            
+            // Check arity
+            int arity = commands[i].arity;
+            if ((arity > 0 && argc != arity) ||
+                (arity < 0 && argc < -arity)) {
+                send_error(conn, "ERR wrong number of arguments");
+                return;
+            }
+            
+            commands[i].handler(conn, args, arg_lens, argc);
+            return;
+        }
+    }
+    
+    send_error(conn, "ERR unknown command");
+}
+```
+
+### 5.2 Example Command Handlers
+
+```c
+void cmd_set(struct tcp_connection *conn, 
+             uint8_t **args, size_t *arg_lens, int argc) {
+    // args[0] = "SET", args[1] = key, args[2] = value
+    
+    struct db_value *val = malloc(sizeof(*val) + arg_lens[2]);
+    val->type = DB_STRING;
+    val->len = arg_lens[2];
+    memcpy(val->data, args[2], arg_lens[2]);
+    
+    hash_set(conn->shard->hash_table, args[1], arg_lens[1], val);
+    send_simple_string(conn, "OK");
+}
+
+void cmd_get(struct tcp_connection *conn, 
+             uint8_t **args, size_t *arg_lens, int argc) {
+    struct db_value *val = hash_get(conn->shard->hash_table, 
+                                     args[1], arg_lens[1]);
+    
+    if (!val) {
+        send_null_bulk(conn);
+    } else if (val->type != DB_STRING) {
+        send_error(conn, "WRONGTYPE");
+    } else {
+        send_bulk_string(conn, val->data, val->len);
+    }
+}
+
+void cmd_lpush(struct tcp_connection *conn, 
+               uint8_t **args, size_t *arg_lens, int argc) {
+    struct db_value *val = hash_get(conn->shard->hash_table, 
+                                     args[1], arg_lens[1]);
+    
+    if (!val) {
+        val = malloc(sizeof(*val));
+        val->type = DB_LIST;
+        val->list = quicklist_new();
+        hash_set(conn->shard->hash_table, args[1], arg_lens[1], val);
+    }
+    
+    if (val->type != DB_LIST) {
+        send_error(conn, "WRONGTYPE");
+        return;
+    }
+    
+    // Push all elements
+    for (int i = 2; i < argc; i++) {
+        quicklist_push_head(val->list, args[i], arg_lens[i]);
+    }
+    
+    send_integer(conn, val->list->count);
+}
+```
+
+### 5.3 Response Encoding
+
+```c
+void send_simple_string(struct tcp_connection *conn, const char *str) {
+    size_t len = strlen(str);
+    char buf[512];
+    snprintf(buf, sizeof(buf), "+%s\r\n", str);
+    tcp_send(conn, (uint8_t*)buf, len + 3);
+}
+
+void send_error(struct tcp_connection *conn, const char *err) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "-%s\r\n", err);
+    tcp_send(conn, (uint8_t*)buf, strlen(buf));
+}
+
+void send_integer(struct tcp_connection *conn, int64_t val) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), ":%lld\r\n", val);
+    tcp_send(conn, (uint8_t*)buf, strlen(buf));
+}
+
+void send_bulk_string(struct tcp_connection *conn, 
+                      const uint8_t *data, size_t len) {
+    char buf[64];
+    int hdr_len = snprintf(buf, sizeof(buf), "$%zu\r\n", len);
+    
+    // Send header
+    tcp_send(conn, (uint8_t*)buf, hdr_len);
+    // Send data (zero-copy from our structures)
+    tcp_send(conn, data, len);
+    // Send trailing \r\n
+    tcp_send(conn, (uint8_t*)"\r\n", 2);
+}
+
+void send_null_bulk(struct tcp_connection *conn) {
+    tcp_send(conn, (uint8_t*)"$-1\r\n", 5);
+}
+```
+
+---
+
+## Part 6: Development Roadmap
+
+### Milestone 1: RESP Server (Week 1-2)
+**Goal:** Functional single-threaded server with standard sockets
+
+1. Implement epoll event loop
+2. Accept TCP connections
+3. Parse RESP commands (state machine)
+4. Implement naive hash table (chained)
+5. Support PING, ECHO, SET, GET, DEL
+
+**Success Criteria:**
+- `redis-cli` can connect and execute commands
+- Unit tests for RESP parser (fuzz with random input)
+- Benchmark: 100K ops/sec on localhost
+
+### Milestone 2: Robin Hood Hash Table (Week 2-3)
+**Goal:** Optimize core data structure
+
+1. Replace chained hash with flat array
+2. Implement Robin Hood probing + backshift deletion
+3. Add automatic resizing (double at 70% load)
+4. Benchmark probe counts
+
+**Success Criteria:**
+- Average PSL < 2.0 at 70% load
+- p99 lookup time < 100ns
+- Throughput: 200K+ ops/sec
+
+### Milestone 3: Raw Packet I/O (Week 3-5)
+**Goal:** Bypass kernel networking
+
+1. Open AF_PACKET raw socket
+2. Parse Ethernet/IP/ARP/ICMP headers
+3. Respond to ARP requests, ICMP pings
+4. Implement IP checksum validation
+
+**Success Criteria:**
+- `ping <virtual_ip>` works
+- Wireshark shows correct packet formats
+- No kernel TCP involvement (verify with `strace`)
+
+### Milestone 4: TCP Stack (Week 5-8)
+**Goal:** Full TCP implementation
+
+1. TCP header parsing/building
+2. 3-way handshake (SYN/SYN-ACK/ACK)
+3. Sequence number tracking
+4. Sliding window and flow control
+5. Retransmission timers
+6. Out-of-order buffering
+7. FIN/ACK close sequence
+
+**Success Criteria:**
+- `redis-cli` connects over userspace stack
+- Telnet session works (`telnet <ip> <port>`)
+- Handle packet loss (use `tc` to inject drops)
+- Throughput: 1 Gbps+
+
+### Milestone 5: Lists & Sorted Sets (Week 8-9)
+**Goal:** Advanced data types
+
+1. Implement quicklist (ziplist nodes)
+2. Support LPUSH, RPUSH, LPOP, RPOP, LRANGE
+3. Implement skiplist + hash for sorted sets
+4. Support ZADD, ZREM, ZRANGE, ZSCORE
+
+**Success Criteria:**
+- All Redis list/zset commands functional
+- LRANGE on 10K elements: <1ms
+- Sorted set operations: <100μs p99
+
+### Milestone 6: Multi-Threading & Sharding (Week 9-10)
+**Goal:** Scale to multiple cores
+
+1. Create per-core shards (hash table + event loop)
+2. Implement keyspace partitioning (hash % num_shards)
+3. Use SO_REUSEPORT for connection distribution
+4. Add atomic counters for stats
+
+**Success Criteria:**
+- Linear scaling with CPU count
+- 1M+ ops/sec on 8-core machine
+- No lock contention in common path
+
+### Milestone 7: Expiration & Persistence (Week 10-11)
+**Goal:** Production features
+
+1. Timing wheel for key expiration
+2. AOF logging (append-only file)
+3. RDB snapshots (fork + serialize)
+4. Configurable fsync policies
+
+**Success Criteria:**
+- Keys expire within 1 tick (100ms)
+- Restart recovers all data from AOF
+- Snapshot completes in <1s for 1M keys
+
+### Milestone 8: AF_XDP/DPDK (Week 11-12)
+**Goal:** Maximum performance
+
+1. Port to AF_XDP with UMEM
+2. Batch packet processing (64-256 per poll)
+3. Pin threads to CPUs (CPU affinity)
+4. Tune NIC ring sizes
+
+**Success Criteria:**
+- 10M+ pps packet rate
+- Sub-microsecond packet processing
+- 10 Gbps+ throughput
+- Compare: Kernel stack vs AF_XDP latency histogram
+
+---
+
+## Part 7: Performance Optimization Techniques
+
+### 7.1 Cache Optimization
+
+**Data Structure Layout:**
+```c
+// BAD: Scattered allocations
+struct bad_entry {
+    char *key;     // Pointer chase #1
+    char *value;   // Pointer chase #2
+};
+
+// GOOD: Inline data
+struct good_entry {
+    uint16_t key_len;
+    uint16_t val_len;
+    uint8_t data[];  // key + value contiguous
+};
+```
+
+**Alignment:**
+```c
+// Align hot structures to cache lines (64 bytes)
+struct __attribute__((aligned(64))) tcp_connection {
+    // Hot fields first (accessed every packet)
+    uint32_t rcv_nxt;
+    uint32_t snd_una;
+    enum tcp_state state;
+    
+    // ... cold fields later
+};
+```
+
+### 7.2 Batching
+
+**Packet Processing:**
+```c
+// Process multiple packets per epoll wake
+while ((n = xsk_ring_cons__peek(&xsk->rx, BATCH_SIZE, &idx)) > 0) {
+    for (int i = 0; i < n; i++) {
+        process_packet(...);
+    }
+    xsk_ring_cons__release(&xsk->rx, n);
+}
+
+// Send batches with sendmmsg
+struct mmsghdr msgs[32];
+sendmmsg(fd, msgs, 32, 0);
+```
+
+### 7.3 Memory Allocation
+
+**Object Pools:**
+```c
+struct connection_pool {
+    struct tcp_connection free_list[1024];
+    int free_count;
+};
+
+struct tcp_connection* conn_alloc(struct connection_pool *pool) {
+    if (pool->free_count > 0) {
+        return &pool->free_list[--pool->free_count];  // O(1)
+    }
+    return malloc(sizeof(struct tcp_connection));  // Fallback
+}
+```
+
+### 7.4 Profiling Tools
+
+```bash
+# CPU profiling
+perf record -F 999 -g ./redis-server
+perf report
+
+# Cache misses
+perf stat -e cache-misses,cache-references ./redis-server
+
+# Context switches
+perf stat -e context-switches ./redis-server
+
+# Flamegraph
+perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+```
+
+---
+
+## Part 8: Testing Strategy
+
+### 8.1 Unit Tests
+
+```c
+// Test hash table
+void test_hash_operations() {
+    struct hash_table *ht = hash_new(16);
+    
+    // Insert
+    hash_set(ht, "key1", 4, value1);
+    assert(hash_get(ht, "key1", 4) == value1);
+    
+    // Overwrite
+    hash_set(ht, "key1", 4, value2);
+    assert(hash_get(ht, "key1", 4) == value2);
+    
+    // Delete
+    hash_delete(ht, "key1", 4);
+    assert(hash_get(ht, "key1", 4) == NULL);
+    
+    // Resize stress test
+    for (int i = 0; i < 10000; i++) {
+        char key[32];
+        snprintf(key, sizeof(key), "key%d", i);
+        hash_set(ht, key, strlen(key), (void*)(uintptr_t)i);
+    }
+    
+    for (int i = 0; i < 10000; i++) {
+        char key[32];
+        snprintf(key, sizeof(key), "key%d", i);
+        assert((uintptr_t)hash_get(ht, key, strlen(key)) == i);
+    }
+}
+
+// Test TCP sequence number wraparound
+void test_tcp_seq_compare() {
+    assert(SEQ_LT(100, 200) == true);
+    assert(SEQ_LT(0xFFFFFFF0, 0x00000010) == true);  // Wraparound
+    assert(SEQ_GT(0x00000010, 0xFFFFFFF0) == true);
+}
+```
+
+### 8.2 Integration Tests
+
+```python
+# Test RESP protocol
+import socket
+
+def test_ping():
+    s = socket.socket()
+    s.connect(('127.0.0.1', 6379))
+    s.sendall(b'*1\r\n$4\r\nPING\r\n')
+    assert s.recv(1024) == b'+PONG\r\n'
+
+def test_set_get():
+    s = socket.socket()
+    s.connect(('127.0.0.1', 6379))
+    
+    # SET key value
+    s.sendall(b'*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n')
+    assert s.recv(1024) == b'+OK\r\n'
+    
+    # GET key
+    s.sendall(b'*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n')
+    resp = s.recv(1024)
+    assert resp == b'$5\r\nvalue\r\n'
+```
+
+### 8.3 Benchmarking
+
+```bash
+# Redis-benchmark
+redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 1000000 -c 50 -q
+
+# Custom latency test
+for i in {1..10000}; do
+  echo -ne "*2\r\n\$3\r\nGET\r\n\$4\r\nkey$i\r\n" | nc 127.0.0.1 6379 > /dev/null
+done
+
+# Measure packet processing
+tcpdump -i eth0 -w capture.pcap
+# ... run test ...
+tcpdump -r capture.pcap | wc -l  # Count packets
+```
+
+---
+
+## Part 9: Measurable Performance Targets
+
+### 9.1 Latency (p50 / p99 / p999)
+
+| Operation | Target (μs) | Kernel Baseline (μs) |
+|-----------|-------------|---------------------|
+| PING      | 5 / 10 / 20 | 50 / 100 / 500      |
+| GET       | 10 / 20 / 50| 80 / 150 / 1000     |
+| SET       | 15 / 30 / 80| 100 / 200 / 1500    |
+| LPUSH     | 20 / 40 / 100| 120 / 250 / 2000   |
+
+### 9.2 Throughput
+
+| Workload      | Target (ops/sec) | Notes                    |
+|---------------|------------------|--------------------------|
+| Single-thread | 200K+            | Hash table bound         |
+| 4-core        | 800K+            | Linear scaling           |
+| 8-core        | 1.5M+            | Slight contention        |
+| AF_XDP        | 2M+              | Zero-copy advantage      |
+
+### 9.3 Packet Processing
+
+| Metric                    | Target       | Baseline (Kernel) |
+|---------------------------|--------------|-------------------|
+| Packets per second        | 10M+         | 1-2M              |
+| CPU cycles/packet         | 500-1000     | 5000-10000        |
+| Context switches/packet   | 0            | 2+                |
+| Memory copies/packet      | 0-1          | 2-3               |
+
+### 9.4 Data Structure Performance
+
+| Structure   | Operation | Target       |
+|-------------|-----------|--------------|
+| Hash Table  | Lookup    | <100ns       |
+| Hash Table  | Insert    | <200ns       |
+| Quicklist   | Push/Pop  | <50ns        |
+| Quicklist   | Range(100)| <5μs         |
+| Skiplist    | Insert    | <500ns       |
+| Skiplist    | Range(100)| <10μs        |
+
+---
+
+## Part 10: Project Structure
+
+```
+redis-tcp/
+├── src/
+│   ├── main.c                 # Entry point, config parsing
+│   ├── network/
+│   │   ├── packet_io.c        # AF_PACKET/AF_XDP abstraction
+│   │   ├── ethernet.c         # Ethernet frame handling
+│   │   ├── ip.c               # IPv4, ARP, ICMP
+│   │   ├── tcp.c              # TCP state machine
+│   │   └── checksum.c         # IP/TCP checksums
+│   ├── protocol/
+│   │   ├── resp_parser.c      # RESP state machine
+│   │   └── resp_encoder.c     # Response encoding
+│   ├── engine/
+│   │   ├── hash_table.c       # Robin Hood hash
+│   │   ├── quicklist.c        # List implementation
+│   │   ├── skiplist.c         # Sorted set
+│   │   ├── timing_wheel.c     # Expiration
+│   │   └── commands.c         # Command handlers
+│   ├── core/
+│   │   ├── event_loop.c       # Epoll management
+│   │   ├── shard.c            # Per-core sharding
+│   │   └── connection.c       # Connection state
+│   └── util/
+│       ├── log.c              # Logging
+│       ├── stats.c            # Performance counters
+│       └── pool.c             # Object pools
+├── include/
+│   └── *.h                    # Header files
+├── tests/
+│   ├── unit/                  # Unit tests (check/cmocka)
+│   ├── integration/           # Python integration tests
+│   └── bench/                 # Benchmark scripts
+├── docs/
+│   ├── ARCHITECTURE.md        # This document
+│   ├── TCP_SPEC.md            # TCP implementation notes
+│   └── PERFORMANCE.md         # Tuning guide
+├── Makefile
+└── README.md
+```
+
+---
+
+## Part 11: Build and Run
+
+### Compilation
+
+```makefile
+CC = gcc
+CFLAGS = -O3 -march=native -Wall -Wextra -g
+CFLAGS += -D_GNU_SOURCE  # For AF_PACKET
+LDFLAGS = -lpthread -lm
+
+# Optional: Link against libxdp for AF_XDP
+CFLAGS += -DUSE_XDP
+LDFLAGS += -lxdp -lbpf
+
+SRCS = $(wildcard src/**/*.c src/*.c)
+OBJS = $(SRCS:.c=.o)
+
+redis-server: $(OBJS)
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+clean:
+	rm -f $(OBJS) redis-server
+```
+
+### Execution
+
+```bash
+# Standard mode (requires root for raw sockets)
+sudo ./redis-server --bind 192.168.1.100 --port 6379 --threads 4
+
+# Enable AF_XDP
+sudo ./redis-server --io-engine xdp --interface eth0
+
+# Attach to CPU cores
+sudo taskset -c 0-7 ./redis-server --threads 8
+
+# Verbose logging
+sudo ./redis-server --loglevel debug
+```
+
+### Configuration
+
+```ini
+# redis.conf
+bind 192.168.1.100
+port 6379
+threads 4
+io-engine af_packet  # or: xdp, dpdk
+interface eth0
+
+# Data structures
+hash-max-load-factor 0.7
+quicklist-max-ziplist-entries 128
+
+# Persistence
+appendonly yes
+appendfsync everysec
+save 900 1
+```
+
+---
+
+## Part 12: Key Learning Outcomes
+
+Upon completion, you will have mastered:
+
+1. **Low-level networking:** Packet parsing, protocol state machines, checksums
+2. **Kernel bypass:** AF_PACKET, AF_XDP, zero-copy techniques
+3. **High-performance data structures:** Robin Hood hashing, skiplists, quicklists
+4. **Systems programming:** Memory alignment, cache optimization, batching
+5. **Concurrency:** Lock-free sharding, event loops, thread pinning
+6. **Protocol implementation:** RESP parsing, TCP reliability, flow control
+
+**Recommended Next Steps:**
+- Add TLS support (kernel TLS offload)
+- Implement Raft consensus for replication
+- Add Lua scripting support
+- Optimize with SIMD (AVX2/AVX-512) for checksums
+- Port to DPDK for 40+ Gbps throughput
+
+---
+
+## References & Citations
+
+- Robin Hood Hashing: https://thenumb.at/Hashtables/
+- Redis Quicklist: https://matt.sh/redis-quicklist  
+- Redis Sorted Sets: https://redis.io/docs/data-types/sorted-sets/
+- AF_XDP: Linux kernel documentation
+- TCP RFC 793: IETF standards
+- Zero-copy I/O: Various StackOverflow discussions on AF_PACKET/XDP
+
+**This comprehensive plan provides a clear roadmap to build a production-grade, learning-focused system. Start with Milestone 1 and iterate!**
