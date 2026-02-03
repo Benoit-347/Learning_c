@@ -13,7 +13,7 @@ int f(char s){
         case '^': return 5;
         case '(': return 0;
         case '#': return -1;
-        default: return 8;
+        default: return 8;  // for ')'
     }
 }
 
