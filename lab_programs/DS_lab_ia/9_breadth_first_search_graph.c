@@ -16,6 +16,23 @@ void bfs(int n, int source, int amat[][SIZE], int visited[]) {
     }
 }
 
+void dfs(int n, int u, int amat[][SIZE], int visited[]) {
+    int v;
+    // Step 1: Mark the current node as visited
+    visited[u] = 1;
+    
+    // Step 2: Look at all neighbors 'v' of the current node 'u'
+    for (v = 0; v < n; v++) {
+        // If there is a connection AND the neighbor hasn't been visited
+        if (amat[u][v] == 1 && visited[v] == 0) {
+            // Visit that neighbor immediately (going deeper)
+            dfs(n, v, amat, visited);
+
+            // the child's end will be reached first > then next parent
+        }
+    }
+}
+
 int main() {
     int n, amat[SIZE][SIZE], source, visited[SIZE]={0}, i, j;
 
