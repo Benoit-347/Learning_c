@@ -53,11 +53,26 @@ int main() {
     scanf("%d", &source);
     bfs(n, source, amat, visited);  // Starting from source, the output is visited rows. The source is already visited. The source shows the directions to visit. We follow all directions from source, and show n row's 1-D visited arr
 
+    printf("Showcasing bfs:\n");
     for(i=0;i<n;i++){
         if(visited[i]==0)
             printf("%d is not reachable\n", i);
         else
             printf("%d is reachable\n",i);
     }
+    
+    for(i=0;i<n;i++)
+        visited[i] = 0;    // reset visited arr (to showcase dfs as well)
+
+    dfs(n, source, amat, visited);
+
+    printf("Showcasing dfs: \n");
+    for(i=0;i<n;i++){
+        if(visited[i]==0)
+            printf("%d is not reachable\n", i);
+        else
+            printf("%d is reachable\n",i);
+    }
+    
     return 0;
 }
